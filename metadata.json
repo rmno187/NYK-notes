@@ -1,0 +1,6 @@
+{
+  "name": "Offline Markdown Notes",
+  "description": "A privacy-first offline markdown editor with encryption, local file storage, keyboard navigation, and tag organization.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
