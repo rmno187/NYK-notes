@@ -107,9 +107,7 @@ export default function App() {
   const [showDates, setShowDates] = useState<boolean>(
     () => localStorage.getItem('notes_show_dates') === 'true'
   );
-  const [noteListPreviewMode, setNoteListPreviewMode] = useState<'summary' | 'full'>(
-    () => (localStorage.getItem('notes_preview_mode') as 'summary' | 'full') || 'summary'
-  );
+  
   const [isSearchMode, setIsSearchMode] = useState(false);
   const [isSavedIndicator, setIsSavedIndicator] = useState(false);
   const [mobileView, setMobileView] = useState<'list' | 'editor'>('list');
@@ -653,7 +651,6 @@ export default function App() {
           isSearchMode={isSearchMode}
           onToggleSearchMode={() => setIsSearchMode((prev) => !prev)}
           showDates={showDates}
-          noteListPreviewMode={noteListPreviewMode}
           onOpenSettingsModal={() => setIsSettingsModalOpen(true)}
           className={mobileView === 'editor' ? 'hidden md:flex w-full md:w-80' : 'flex w-full md:w-80'}
         />
@@ -718,14 +715,6 @@ export default function App() {
           setShowDates((prev) => {
             const next = !prev;
             localStorage.setItem('notes_show_dates', String(next));
-            return next;
-          });
-        }}
-        noteListPreviewMode={noteListPreviewMode}
-        onToggleNoteListPreviewMode={() => {
-          setNoteListPreviewMode((prev) => {
-            const next = prev === 'full' ? 'summary' : 'full';
-            localStorage.setItem('notes_preview_mode', next);
             return next;
           });
         }}

@@ -3,7 +3,6 @@ import { convertHtmlToMarkdown } from '../lib/markdown';
 
 interface NotePreviewProps {
   content: string;
-  isFullMode?: boolean;
 }
 
 function parseInlineTokens(text: string): React.ReactNode[] {
@@ -158,7 +157,7 @@ function renderLine(line: string): React.ReactNode {
   return <span>{parseInlineTokens(text)}</span>;
 }
 
-export const NotePreview: React.FC<NotePreviewProps> = ({ content, isFullMode = false }) => {
+export const NotePreview: React.FC<NotePreviewProps> = ({ content }) => {
   if (!content || !content.trim()) {
     return <span className="italic text-neutral-400 font-normal">Empty note...</span>;
   }
@@ -184,10 +183,10 @@ export const NotePreview: React.FC<NotePreviewProps> = ({ content, isFullMode = 
     return <span className="italic text-neutral-400 font-normal">Empty note...</span>;
   }
 
-  const displayLines = isFullMode ? lines : lines.slice(0, 3);
+  const displayLines = lines.slice(0, 4);
 
   return (
-    <div className={`space-y-0.5 text-xs text-neutral-700 dark:text-neutral-300 font-normal leading-relaxed ${isFullMode ? '' : 'line-clamp-2'}`}>
+    <div className="space-y-0.5 text-xs text-neutral-700 dark:text-neutral-300 font-normal leading-relaxed line-clamp-4">
       {displayLines.map((line, idx) => {
         const rendered = renderLine(line);
         if (!rendered) return null;

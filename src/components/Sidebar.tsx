@@ -38,7 +38,6 @@ interface SidebarProps {
   isSearchMode: boolean;
   onToggleSearchMode: () => void;
   showDates: boolean;
-  noteListPreviewMode?: 'summary' | 'full';
   onOpenSettingsModal: () => void;
   className?: string;
 }
@@ -63,7 +62,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
   isSearchMode,
   onToggleSearchMode,
   showDates,
-  noteListPreviewMode = 'summary',
   onOpenSettingsModal,
   className = '',
 }) => {
@@ -322,10 +320,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   className="flex items-center space-x-2 px-2.5 py-1.5 rounded-lg border border-neutral-200 dark:border-neutral-800 hover:bg-neutral-200/60 dark:hover:bg-neutral-900 text-neutral-900 dark:text-neutral-100 transition-all text-xs font-bold"
                 >
                   <div className="w-5 h-5 rounded bg-black text-white dark:bg-white dark:text-black flex items-center justify-center p-0.5">
-                    <MarkdownLogo className="w-3.5 h-3.5" />
-                  </div>
+  <img
+    src="/logo.svg"
+    alt="Logo"
+    className="w-full h-full object-contain"
+  />
+</div>
                   <span>{activeTab === 'notes' ? 'Notes' : 'Trash'}</span>
-                  <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-neutral-200 dark:bg-neutral-800 font-mono text-neutral-600 dark:text-neutral-300">
+                  <span className="text-[1px] px-1.5 py-0.2 rounded-full bg-neutral-200 dark:bg-neutral-800 font-mono text-neutral-600 dark:text-neutral-300">
                     {activeTab === 'notes' ? activeNotes.length : trashedNotes.length}
                   </span>
                   <ChevronDown className={`w-3.5 h-3.5 text-neutral-400 transition-transform ${isFolderDropdownOpen ? 'rotate-180' : ''}`} />
@@ -554,28 +556,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 onContextMenu={(e) => handleContextMenu(note.id, e)}
                 onClick={() => handleNoteClick(note.id)}
                 className={`group relative p-2.5 rounded-lg border cursor-pointer transition-all flex items-start space-x-2.5 ${
-                  isSelected
-                    ? 'bg-blue-50/80 dark:bg-blue-950/40 border-blue-500 dark:border-blue-400 text-blue-950 dark:text-blue-100 shadow-2xs'
-                    : isActive
-                    ? 'bg-white dark:bg-neutral-900 border-black dark:border-white text-black dark:text-white shadow-2xs'
-                    : 'bg-transparent border-transparent text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-900/60'
-                }`}
+  isSelected
+    ? 'bg-blue-50/80 dark:bg-blue-950/40 border-blue-500 dark:border-blue-400 text-blue-950 dark:text-blue-100 shadow-2xs'
+    : isActive
+    ? 'bg-white dark:bg-neutral-900 border-transparent text-black dark:text-white border-b-4 border-b-black dark:border-b-white rounded-b-none'
+    : 'bg-transparent border-transparent text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-900/60'
+}`}
               >
-                {/* Checkbox indicator in selection mode */}
-                {selectedNoteIds.length > 0 && (
-                  <div className="shrink-0 pt-0.5">
-                    <div
-                      className={`w-4 h-4 rounded border flex items-center justify-center transition-colors ${
-                        isSelected
-                          ? 'bg-blue-600 border-blue-600 text-white'
-                          : 'border-neutral-400 dark:border-neutral-600 bg-white dark:bg-neutral-900'
-                      }`}
-                    >
-                      {isSelected && <Check className="w-3 h-3 stroke-[3]" />}
-                    </div>
-                  </div>
-                )}
-
+                
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center justify-between gap-1">
                     {/* Render Title if present */}
@@ -588,7 +576,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                       <div className="flex-1 min-w-0">
                         <NotePreview
                           content={note.content}
-                          isFullMode={noteListPreviewMode === 'full'}
+                          
                         />
                       </div>
                     )}
@@ -604,7 +592,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     <div className="mt-1">
                       <NotePreview
                         content={note.content}
-                        isFullMode={noteListPreviewMode === 'full'}
+                        
                       />
                     </div>
                   )}
