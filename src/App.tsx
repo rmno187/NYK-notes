@@ -107,6 +107,9 @@ export default function App() {
   const [showDates, setShowDates] = useState<boolean>(
     () => localStorage.getItem('notes_show_dates') === 'true'
   );
+  const [noteListPreviewMode, setNoteListPreviewMode] = useState<'summary' | 'full'>(
+    () => (localStorage.getItem('notes_preview_mode') as 'summary' | 'full') || 'summary'
+  );
   const [isSearchMode, setIsSearchMode] = useState(false);
   const [isSavedIndicator, setIsSavedIndicator] = useState(false);
   const [mobileView, setMobileView] = useState<'list' | 'editor'>('list');
@@ -271,23 +274,129 @@ export default function App() {
   }, []);
 
   // Create New Note
-  const handleNewNote = useCallback((initialTitle?: string) => {
-    const title = initialTitle && initialTitle.trim() ? initialTitle.trim() : 'Untitled Note';
-    const newNote: Note = {
-      id: `note-${Date.now().toString(36)}`,
-      title: title,
-      content: `# ${title}\n\n`,
-      tags: selectedTag ? [selectedTag] : [],
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-      pinned: false,
-    };
+  const handleNewNote = useCallback(
+    (initialParams?: string | { title?: string; content?: string }) => {
+      let title = '';
+      let content = '';
 
-    setNotes((prev) => [newNote, ...prev]);
-    setActiveNoteId(newNote.id);
-    setMobileView('editor');
-    persistNote(newNote);
-  }, [selectedTag, persistNote]);
+      if (typeof initialParams === 'string') {
+        title = initialParams.trim();
+      } else if (initialParams) {
+        title = initialParams.title?.trim() || '';
+        content = initialParams.content || '';
+      }
+
+      const newNote: Note = {
+        id: `note-${Date.now().toString(36)}`,
+        title: title,
+        content: content,
+        tags: selectedTag ? [selectedTag] : [],
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        pinned: false,
+      };
+
+      setNotes((prev) => [newNote, ...prev]);
+      setActiveNoteId(newNote.id);
+      setMobileView('editor');
+      persistNote(newNote);
+    },
+    [selectedTag, persistNote]
+  );
+
+  // Batch Delete Notes
+  const handleBatchDeleteNotes = useCallback(
+    async (noteIds: string[]) => {
+      if (noteIds.length === 0) return;
+      const idsSet = new Set(noteIds);
+
+      const sample = notes.find((n) => idsSet.has(n.id));
+      if (!sample) return;
+
+      if (!sample.deletedAt) {
+        const now = Date.now();
+        const updatedNotes = notes.map((n) => {
+          if (idsSet.has(n.id)) {
+            const updated = { ...n, deletedAt: now };
+            persistNote(updated);
+            return updated;
+          }
+          return n;
+        });
+        setNotes(updatedNotes);
+
+        if (activeNoteId && idsSet.has(activeNoteId)) {
+          const remaining = updatedNotes.filter((n) => !n.deletedAt);
+          setActiveNoteId(remaining.length > 0 ? remaining[0].id : null);
+        }
+      } else {
+        setNotes((prev) => prev.filter((n) => !idsSet.has(n.id)));
+        if (activeNoteId && idsSet.has(activeNoteId)) {
+          const remaining = notes.filter((n) => !idsSet.has(n.id));
+          setActiveNoteId(remaining.length > 0 ? remaining[0].id : null);
+        }
+
+        for (const noteId of noteIds) {
+          const note = notes.find((n) => n.id === noteId);
+          try {
+            if (storageMode === 'filesystem' && directoryHandle && note?.fileName) {
+              await deleteNoteFromDirectory(directoryHandle, note.fileName);
+            } else {
+              await deleteIndexedDBNote(noteId);
+            }
+          } catch (err) {
+            console.error('Failed to permanently delete note:', err);
+          }
+        }
+      }
+    },
+    [notes, activeNoteId, storageMode, directoryHandle, persistNote]
+  );
+
+  // Batch Toggle Pin Notes
+  const handleBatchTogglePinNotes = useCallback(
+    (noteIds: string[]) => {
+      if (noteIds.length === 0) return;
+      const idsSet = new Set(noteIds);
+
+      const selectedNotes = notes.filter((n) => idsSet.has(n.id));
+      const allPinned = selectedNotes.every((n) => n.pinned);
+      const targetPinnedState = !allPinned;
+
+      setNotes((prev) =>
+        prev.map((n) => {
+          if (idsSet.has(n.id)) {
+            const updated = { ...n, pinned: targetPinnedState, updatedAt: Date.now() };
+            persistNote(updated);
+            return updated;
+          }
+          return n;
+        })
+      );
+    },
+    [notes, persistNote]
+  );
+
+  // Batch Restore Notes
+  const handleBatchRestoreNotes = useCallback(
+    (noteIds: string[]) => {
+      if (noteIds.length === 0) return;
+      const idsSet = new Set(noteIds);
+
+      setNotes((prev) =>
+        prev.map((n) => {
+          if (idsSet.has(n.id)) {
+            const restored = { ...n };
+            delete restored.deletedAt;
+            persistNote(restored);
+            return restored;
+          }
+          return n;
+        })
+      );
+    },
+    [notes, persistNote]
+  );
 
   // Delete Note (Soft delete to Trash if active, or Permanent delete if in Trash)
   const handleDeleteNote = useCallback(
@@ -533,6 +642,9 @@ export default function App() {
           onRestoreNote={handleRestoreNote}
           onEmptyTrash={handleEmptyTrash}
           onTogglePin={handleTogglePin}
+          onBatchDelete={handleBatchDeleteNotes}
+          onBatchTogglePin={handleBatchTogglePinNotes}
+          onBatchRestore={handleBatchRestoreNotes}
           selectedTag={selectedTag}
           onSelectTag={setSelectedTag}
           allTags={allTags}
@@ -541,6 +653,7 @@ export default function App() {
           isSearchMode={isSearchMode}
           onToggleSearchMode={() => setIsSearchMode((prev) => !prev)}
           showDates={showDates}
+          noteListPreviewMode={noteListPreviewMode}
           onOpenSettingsModal={() => setIsSettingsModalOpen(true)}
           className={mobileView === 'editor' ? 'hidden md:flex w-full md:w-80' : 'flex w-full md:w-80'}
         />
@@ -557,6 +670,8 @@ export default function App() {
               onChangeTitle={handleTitleChange}
               onChangeContent={handleContentChange}
               onTogglePin={() => handleTogglePin(activeNote.id)}
+              onDeleteNote={() => handleDeleteNote(activeNote.id)}
+              onRestoreNote={() => handleRestoreNote(activeNote.id)}
               onAddTag={handleAddTag}
               onRemoveTag={handleRemoveTag}
               allTags={allTags}
@@ -603,6 +718,14 @@ export default function App() {
           setShowDates((prev) => {
             const next = !prev;
             localStorage.setItem('notes_show_dates', String(next));
+            return next;
+          });
+        }}
+        noteListPreviewMode={noteListPreviewMode}
+        onToggleNoteListPreviewMode={() => {
+          setNoteListPreviewMode((prev) => {
+            const next = prev === 'full' ? 'summary' : 'full';
+            localStorage.setItem('notes_preview_mode', next);
             return next;
           });
         }}

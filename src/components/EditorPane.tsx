@@ -18,11 +18,13 @@ import {
   Plus,
   X,
   Pin,
+  Trash2,
   Check,
   Eye,
   FileText,
   Edit3,
   ChevronLeft,
+  RotateCcw,
 } from 'lucide-react';
 import { Note, EditorMode } from '../types';
 import { renderMarkdownToHtml, convertHtmlToMarkdown, applyFormatting } from '../lib/markdown';
@@ -32,6 +34,8 @@ interface EditorPaneProps {
   onChangeTitle: (title: string) => void;
   onChangeContent: (content: string) => void;
   onTogglePin: () => void;
+  onDeleteNote?: () => void;
+  onRestoreNote?: () => void;
   onAddTag: (tag: string) => void;
   onRemoveTag: (tag: string) => void;
   allTags: string[];
@@ -47,6 +51,8 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
   onChangeTitle,
   onChangeContent,
   onTogglePin,
+  onDeleteNote,
+  onRestoreNote,
   onAddTag,
   onRemoveTag,
   allTags,
@@ -72,6 +78,12 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
   const wysiwygRef = useRef<HTMLDivElement>(null);
   const [newTagInput, setNewTagInput] = useState('');
   const [showTagInput, setShowTagInput] = useState(false);
+  const [isSlideoutOpen, setIsSlideoutOpen] = useState(false);
+
+  // Close slideout panel when switching notes
+  useEffect(() => {
+    setIsSlideoutOpen(false);
+  }, [note.id]);
 
   // Sync note content to WYSIWYG innerHTML when note changes or mode switches
   useEffect(() => {
@@ -79,10 +91,36 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
       const html = renderMarkdownToHtml(note.content);
       // Avoid overwriting if user is actively typing in wysiwyg
       if (document.activeElement !== wysiwygRef.current) {
-        wysiwygRef.current.innerHTML = html;
+        wysiwygRef.current.innerHTML = html || '<p><br></p>';
       }
     }
   }, [note.id, note.content, mode]);
+
+  const focusContent = useCallback(() => {
+    if (mode === 'wysiwyg' && wysiwygRef.current) {
+      wysiwygRef.current.focus();
+      const sel = window.getSelection();
+      if (sel) {
+        const range = document.createRange();
+        range.selectNodeContents(wysiwygRef.current);
+        range.collapse(false);
+        sel.removeAllRanges();
+        sel.addRange(range);
+      }
+    } else if (mode === 'markdown' && textareaRef.current) {
+      textareaRef.current.focus();
+      const len = textareaRef.current.value.length;
+      textareaRef.current.setSelectionRange(len, len);
+    }
+  }, [mode]);
+
+  // Auto-focus editor body when switching or creating notes so cursor is positioned on a clean line
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      focusContent();
+    }, 80);
+    return () => clearTimeout(timer);
+  }, [note.id, mode, focusContent]);
 
   // Handle direct editing in WYSIWYG contentEditable div
   const handleWysiwygInput = useCallback(() => {
@@ -115,59 +153,68 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
   const [savedRange, setSavedRange] = useState<Range | null>(null);
   const [savedTextareaSel, setSavedTextareaSel] = useState<{ start: number; end: number } | null>(null);
 
-  // Floating selection toolbar state
-  const [floatingToolbarPos, setFloatingToolbarPos] = useState<{ top: number; left: number } | null>(null);
+  // Bottom dock selection toolbar state & keyboard offset tracking
+  const [hasSelection, setHasSelection] = useState(false);
   const [isMoreMenuOpen, setIsMoreMenuOpen] = useState(false);
+  const [keyboardOffset, setKeyboardOffset] = useState(0);
 
-  const updateFloatingToolbar = useCallback(() => {
-    if (mode !== 'wysiwyg') {
-      setFloatingToolbarPos(null);
-      return;
-    }
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.visualViewport) return;
+
+    const handleViewportResize = () => {
+      if (window.visualViewport) {
+        const offset = window.innerHeight - window.visualViewport.height - window.visualViewport.offsetTop;
+        setKeyboardOffset(Math.max(0, offset));
+      }
+    };
+
+    window.visualViewport.addEventListener('resize', handleViewportResize);
+    window.visualViewport.addEventListener('scroll', handleViewportResize);
+    return () => {
+      window.visualViewport?.removeEventListener('resize', handleViewportResize);
+      window.visualViewport?.removeEventListener('scroll', handleViewportResize);
+    };
+  }, []);
+
+  const updateSelectionState = useCallback(() => {
     const sel = window.getSelection();
-    if (!sel || sel.isCollapsed || !wysiwygRef.current) {
-      setFloatingToolbarPos(null);
+    if (!sel || sel.isCollapsed) {
+      setHasSelection(false);
       setIsMoreMenuOpen(false);
       return;
     }
 
     if (sel.rangeCount > 0) {
       const range = sel.getRangeAt(0);
-      if (wysiwygRef.current.contains(range.commonAncestorContainer)) {
-        const rect = range.getBoundingClientRect();
-        const parentElem = wysiwygRef.current.parentElement;
-        const containerRect = parentElem
-          ? parentElem.getBoundingClientRect()
-          : wysiwygRef.current.getBoundingClientRect();
+      const isInsideWysiwyg =
+        wysiwygRef.current && wysiwygRef.current.contains(range.commonAncestorContainer);
+      const isInsideTextarea =
+        textareaRef.current &&
+        textareaRef.current === document.activeElement &&
+        textareaRef.current.selectionStart !== textareaRef.current.selectionEnd;
 
-        if (rect.width > 0) {
-          let top = rect.top - containerRect.top - 48; // Position above text
-          let left = rect.left - containerRect.left + rect.width / 2;
-
-          if (top < 10) top = rect.bottom - containerRect.top + 8; // Flip below if near top
-          if (left < 110) left = 110;
-          if (containerRect.width > 220 && left > containerRect.width - 110) {
-            left = containerRect.width - 110;
-          }
-
-          setFloatingToolbarPos({ top, left });
+      if ((mode === 'wysiwyg' && isInsideWysiwyg) || (mode === 'markdown' && isInsideTextarea)) {
+        const text = mode === 'wysiwyg' ? range.toString().trim() : 'selected';
+        if (text.length > 0) {
+          setHasSelection(true);
           return;
         }
       }
     }
-    setFloatingToolbarPos(null);
+
+    setHasSelection(false);
     setIsMoreMenuOpen(false);
   }, [mode]);
 
   useEffect(() => {
-    const handleSelection = () => {
-      setTimeout(updateFloatingToolbar, 10);
+    const handleSelectionChange = () => {
+      setTimeout(updateSelectionState, 10);
     };
-    document.addEventListener('selectionchange', handleSelection);
+    document.addEventListener('selectionchange', handleSelectionChange);
     return () => {
-      document.removeEventListener('selectionchange', handleSelection);
+      document.removeEventListener('selectionchange', handleSelectionChange);
     };
-  }, [updateFloatingToolbar]);
+  }, [updateSelectionState]);
 
   // Helper to find block node and check if cursor is at start
   const getCaretBlockAndOffset = useCallback((container: HTMLElement) => {
@@ -761,9 +808,9 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
   };
 
   return (
-    <div className="flex-1 flex flex-col h-full w-full min-w-0 overflow-hidden bg-white dark:bg-black transition-colors duration-200">
-      {/* Top Header Bar: Title, Mode Toggle, Pin, Save status */}
-      <div className="p-3 sm:p-4 border-b border-neutral-200 dark:border-neutral-800 space-y-2.5 shrink-0 w-full min-w-0">
+    <div className="flex-1 flex flex-col h-full w-full min-w-0 overflow-hidden bg-white dark:bg-black transition-colors duration-200 relative">
+      {/* Top Header Bar */}
+      <div className="p-3 sm:p-4 border-b border-neutral-200 dark:border-neutral-800 space-y-2.5 shrink-0 w-full min-w-0 bg-neutral-50/50 dark:bg-neutral-950/50">
         <div className="flex items-center justify-between gap-2 min-w-0 w-full">
           <div className="flex items-center space-x-2 flex-1 min-w-0">
             {onBackToList && (
@@ -776,13 +823,53 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
                 <span className="hidden xs:inline">Notes</span>
               </button>
             )}
-            <input
-              type="text"
-              placeholder="Note Title..."
-              value={note.title}
-              onChange={(e) => onChangeTitle(e.target.value)}
-              className="flex-1 min-w-0 text-lg sm:text-2xl font-bold bg-transparent text-neutral-900 dark:text-neutral-100 placeholder-neutral-400 focus:outline-none tracking-tight truncate"
-            />
+
+            {/* Inline Tags Row */}
+            <div className="flex items-center flex-wrap gap-1.5 min-w-0">
+              <div className="flex items-center text-xs text-neutral-400 dark:text-neutral-500 mr-0.5">
+                <TagIcon className="w-3.5 h-3.5 mr-1" />
+                <span className="hidden sm:inline">Tags:</span>
+              </div>
+
+              {note.tags.map((tag) => (
+                <span
+                  key={tag}
+                  className="inline-flex items-center px-2 py-0.5 rounded text-xs font-mono bg-neutral-100 dark:bg-neutral-900 text-neutral-800 dark:text-neutral-200 border border-neutral-200 dark:border-neutral-800"
+                >
+                  #{tag}
+                  <button
+                    onClick={() => onRemoveTag(tag)}
+                    className="ml-1 text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-100"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </span>
+              ))}
+
+              {showTagInput ? (
+                <form onSubmit={handleAddTagSubmit} className="inline-flex items-center">
+                  <input
+                    type="text"
+                    autoFocus
+                    placeholder="tag_name..."
+                    value={newTagInput}
+                    onChange={(e) => setNewTagInput(e.target.value)}
+                    onBlur={() => {
+                      if (!newTagInput) setShowTagInput(false);
+                    }}
+                    className="w-24 px-2 py-0.5 text-xs bg-neutral-100 dark:bg-neutral-900 border border-neutral-400 dark:border-neutral-600 rounded text-neutral-900 dark:text-neutral-100 focus:outline-none"
+                  />
+                </form>
+              ) : (
+                <button
+                  onClick={() => setShowTagInput(true)}
+                  className="inline-flex items-center px-2 py-0.5 rounded text-xs font-mono text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-100 bg-neutral-100 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 transition-colors"
+                >
+                  <Plus className="w-3 h-3 mr-0.5" />
+                  <span>Add Tag</span>
+                </button>
+              )}
+            </div>
           </div>
 
           <div className="flex items-center space-x-1.5 shrink-0">
@@ -792,21 +879,6 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
                 <span>Saved</span>
               </span>
             )}
-
-            {/* Single Markdown Mode Toggle Button */}
-            <button
-              type="button"
-              onClick={onToggleEditorMode || (() => setMode(mode === 'wysiwyg' ? 'markdown' : 'wysiwyg'))}
-              className={`px-2.5 py-1.5 rounded-lg border transition-all flex items-center space-x-1.5 text-xs font-semibold ${
-                mode === 'markdown'
-                  ? 'bg-neutral-900 text-white dark:bg-neutral-100 dark:text-black border-neutral-900 dark:border-neutral-100 shadow-2xs'
-                  : 'bg-neutral-100 dark:bg-neutral-900 text-neutral-600 dark:text-neutral-400 border-neutral-200 dark:border-neutral-800 hover:text-black dark:hover:text-white'
-              }`}
-              title={mode === 'markdown' ? 'Raw Markdown View Active (Click for WYSIWYG)' : 'Click to Toggle Raw Markdown View'}
-            >
-              <Eye className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Markdown</span>
-            </button>
 
             {/* Pin Note */}
             <button
@@ -820,54 +892,21 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
             >
               <Pin className={`w-4 h-4 ${note.pinned ? 'fill-current' : ''}`} />
             </button>
-          </div>
-        </div>
 
-        {/* Tags Row */}
-        <div className="flex items-center flex-wrap gap-1.5 pt-0.5 min-w-0 w-full">
-          <div className="flex items-center text-xs text-neutral-400 dark:text-neutral-500 mr-1">
-            <TagIcon className="w-3.5 h-3.5 mr-1" />
-            <span>Tags:</span>
-          </div>
-
-          {note.tags.map((tag) => (
-            <span
-              key={tag}
-              className="inline-flex items-center px-2 py-0.5 rounded text-xs font-mono bg-neutral-100 dark:bg-neutral-900 text-neutral-800 dark:text-neutral-200 border border-neutral-200 dark:border-neutral-800"
-            >
-              #{tag}
-              <button
-                onClick={() => onRemoveTag(tag)}
-                className="ml-1 text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-100"
-              >
-                <X className="w-3 h-3" />
-              </button>
-            </span>
-          ))}
-
-          {showTagInput ? (
-            <form onSubmit={handleAddTagSubmit} className="inline-flex items-center">
-              <input
-                type="text"
-                autoFocus
-                placeholder="tag_name..."
-                value={newTagInput}
-                onChange={(e) => setNewTagInput(e.target.value)}
-                onBlur={() => {
-                  if (!newTagInput) setShowTagInput(false);
-                }}
-                className="w-24 px-2 py-0.5 text-xs bg-neutral-100 dark:bg-neutral-900 border border-neutral-400 dark:border-neutral-600 rounded text-neutral-900 dark:text-neutral-100 focus:outline-none"
-              />
-            </form>
-          ) : (
+            {/* Three Dot Menu Button */}
             <button
-              onClick={() => setShowTagInput(true)}
-              className="inline-flex items-center px-2 py-0.5 rounded text-xs font-mono text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-100 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 transition-colors"
+              type="button"
+              onClick={() => setIsSlideoutOpen(true)}
+              title="More Actions & Options"
+              className={`p-1.5 rounded-lg border transition-colors ${
+                isSlideoutOpen
+                  ? 'bg-neutral-900 text-white dark:bg-neutral-100 dark:text-black border-neutral-900 dark:border-neutral-100'
+                  : 'bg-neutral-100 dark:bg-neutral-900 text-neutral-600 dark:text-neutral-400 hover:text-black dark:hover:text-white border-neutral-200 dark:border-neutral-800'
+              }`}
             >
-              <Plus className="w-3 h-3 mr-0.5" />
-              <span>Add Tag</span>
+              <MoreVertical className="w-4 h-4" />
             </button>
-          )}
+          </div>
         </div>
       </div>
 
@@ -1035,25 +1074,41 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
         </button>
       </div>
 
-      {/* Content Area: WYSIWYG or Raw Markdown */}
-      <div className="flex-1 p-4 sm:p-6 overflow-y-auto relative min-w-0 w-full">
-        {/* Floating Selection Toolbar */}
-        {floatingToolbarPos && mode === 'wysiwyg' && (
-          <div
-            style={{
-              top: `${floatingToolbarPos.top}px`,
-              left: `${floatingToolbarPos.left}px`,
-              transform: 'translateX(-50%)',
+      {/* Content Area: Title + WYSIWYG or Raw Markdown */}
+      <div className="flex-1 p-4 sm:p-6 overflow-y-auto relative min-w-0 w-full flex flex-col">
+        {/* Title inside the Editor Box */}
+        <div className="mb-4 pb-2 border-b border-neutral-100 dark:border-neutral-900 shrink-0">
+          <input
+            type="text"
+            placeholder="Title"
+            value={note.title}
+            onChange={(e) => onChangeTitle(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                focusContent();
+              }
             }}
-            onMouseDown={(e) => e.preventDefault()}
-            className="absolute z-30 flex items-center bg-neutral-900/95 dark:bg-neutral-800/95 text-white backdrop-blur-md rounded-xl p-1 shadow-2xl border border-neutral-700/80 animate-in fade-in zoom-in-95 duration-100"
-          >
+            className="w-full text-2xl sm:text-3xl font-extrabold bg-transparent text-neutral-900 dark:text-neutral-100 placeholder-neutral-300 dark:placeholder-neutral-700 focus:outline-none tracking-tight"
+          />
+        </div>
+
+        {/* Bottom Keyboard-Docked Selection Bar */}
+      {hasSelection && (
+        <div
+          style={{
+            bottom: `${keyboardOffset}px`,
+          }}
+          onMouseDown={(e) => e.preventDefault()}
+          className="fixed inset-x-0 z-50 bg-neutral-900/95 dark:bg-neutral-800/95 text-white backdrop-blur-md border-t border-neutral-700/80 px-4 py-2 flex items-center justify-center shadow-2xl animate-in slide-in-from-bottom-2 duration-150"
+        >
+          <div className="flex items-center space-x-2 sm:space-x-3 max-w-xs sm:max-w-sm w-full justify-around">
             <button
               type="button"
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => handleFormat('bold')}
               title="Bold (⌘B)"
-              className={`p-1.5 rounded-lg transition-colors hover:bg-neutral-700/80 ${
+              className={`p-2 rounded-lg transition-colors hover:bg-neutral-700/80 ${
                 activeFormats.bold ? 'text-blue-400 font-bold bg-neutral-700' : 'text-neutral-200'
               }`}
             >
@@ -1065,7 +1120,7 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => handleFormat('italic')}
               title="Italic (⌘I)"
-              className={`p-1.5 rounded-lg transition-colors hover:bg-neutral-700/80 ${
+              className={`p-2 rounded-lg transition-colors hover:bg-neutral-700/80 ${
                 activeFormats.italic ? 'text-blue-400 font-bold bg-neutral-700' : 'text-neutral-200'
               }`}
             >
@@ -1076,12 +1131,16 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
               type="button"
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => {
-                document.execCommand('underline', false);
-                handleWysiwygInput();
-                checkActiveFormats();
+                if (mode === 'wysiwyg') {
+                  document.execCommand('underline', false);
+                  handleWysiwygInput();
+                  checkActiveFormats();
+                } else {
+                  handleFormat('bold');
+                }
               }}
               title="Underline"
-              className="p-1.5 rounded-lg transition-colors hover:bg-neutral-700/80 text-neutral-200"
+              className="p-2 rounded-lg transition-colors hover:bg-neutral-700/80 text-neutral-200"
             >
               <Underline className="w-4 h-4" />
             </button>
@@ -1091,33 +1150,34 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => handleFormat('link')}
               title="Insert Link"
-              className={`p-1.5 rounded-lg transition-colors hover:bg-neutral-700/80 ${
+              className={`p-2 rounded-lg transition-colors hover:bg-neutral-700/80 ${
                 activeFormats.link ? 'text-blue-400 font-bold bg-neutral-700' : 'text-neutral-200'
               }`}
             >
               <Link className="w-4 h-4" />
             </button>
 
-            <div className="w-px h-4 bg-neutral-700 mx-1" />
+            <div className="w-px h-5 bg-neutral-700 my-auto" />
 
-            {/* More Menu Toggle (⋮) */}
+            {/* Submenu Toggle (⋮) */}
             <div className="relative">
               <button
                 type="button"
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => setIsMoreMenuOpen((prev) => !prev)}
                 title="More formatting options"
-                className={`p-1.5 rounded-lg transition-colors hover:bg-neutral-700/80 ${
+                className={`p-2 rounded-lg transition-colors hover:bg-neutral-700/80 ${
                   isMoreMenuOpen ? 'bg-neutral-700 text-white' : 'text-neutral-200'
                 }`}
               >
                 <MoreVertical className="w-4 h-4" />
               </button>
 
+              {/* Submenu opens UPWARD above the bottom bar */}
               {isMoreMenuOpen && (
                 <div
                   onMouseDown={(e) => e.preventDefault()}
-                  className="absolute right-0 top-full mt-1.5 w-44 bg-neutral-900 border border-neutral-700 rounded-xl p-1 shadow-2xl flex flex-col space-y-0.5 text-xs text-neutral-200 z-40 animate-in fade-in zoom-in-95"
+                  className="absolute right-0 bottom-full mb-2.5 w-48 bg-neutral-900 border border-neutral-700 rounded-xl p-1.5 shadow-2xl flex flex-col space-y-0.5 text-xs text-neutral-200 z-50 animate-in fade-in slide-in-from-bottom-2 duration-100 max-h-60 overflow-y-auto"
                 >
                   <button
                     type="button"
@@ -1125,9 +1185,9 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
                       handleFormat('heading');
                       setIsMoreMenuOpen(false);
                     }}
-                    className="flex items-center space-x-2 px-2.5 py-1.5 hover:bg-neutral-800 rounded-lg text-left"
+                    className="flex items-center space-x-2.5 px-3 py-2 hover:bg-neutral-800 rounded-lg text-left"
                   >
-                    <Heading1 className="w-3.5 h-3.5 text-neutral-400" />
+                    <Heading1 className="w-4 h-4 text-neutral-400" />
                     <span>Heading 1</span>
                   </button>
                   <button
@@ -1136,9 +1196,9 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
                       handleFormat('h2');
                       setIsMoreMenuOpen(false);
                     }}
-                    className="flex items-center space-x-2 px-2.5 py-1.5 hover:bg-neutral-800 rounded-lg text-left"
+                    className="flex items-center space-x-2.5 px-3 py-2 hover:bg-neutral-800 rounded-lg text-left"
                   >
-                    <Heading2 className="w-3.5 h-3.5 text-neutral-400" />
+                    <Heading2 className="w-4 h-4 text-neutral-400" />
                     <span>Heading 2</span>
                   </button>
                   <button
@@ -1147,9 +1207,9 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
                       handleFormat('bullet');
                       setIsMoreMenuOpen(false);
                     }}
-                    className="flex items-center space-x-2 px-2.5 py-1.5 hover:bg-neutral-800 rounded-lg text-left"
+                    className="flex items-center space-x-2.5 px-3 py-2 hover:bg-neutral-800 rounded-lg text-left"
                   >
-                    <List className="w-3.5 h-3.5 text-neutral-400" />
+                    <List className="w-4 h-4 text-neutral-400" />
                     <span>Bullet List</span>
                   </button>
                   <button
@@ -1158,9 +1218,9 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
                       handleFormat('number');
                       setIsMoreMenuOpen(false);
                     }}
-                    className="flex items-center space-x-2 px-2.5 py-1.5 hover:bg-neutral-800 rounded-lg text-left"
+                    className="flex items-center space-x-2.5 px-3 py-2 hover:bg-neutral-800 rounded-lg text-left"
                   >
-                    <ListOrdered className="w-3.5 h-3.5 text-neutral-400" />
+                    <ListOrdered className="w-4 h-4 text-neutral-400" />
                     <span>Numbered List</span>
                   </button>
                   <button
@@ -1169,9 +1229,9 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
                       handleFormat('task');
                       setIsMoreMenuOpen(false);
                     }}
-                    className="flex items-center space-x-2 px-2.5 py-1.5 hover:bg-neutral-800 rounded-lg text-left"
+                    className="flex items-center space-x-2.5 px-3 py-2 hover:bg-neutral-800 rounded-lg text-left"
                   >
-                    <CheckSquare className="w-3.5 h-3.5 text-neutral-400" />
+                    <CheckSquare className="w-4 h-4 text-neutral-400" />
                     <span>Task List</span>
                   </button>
                   <button
@@ -1180,9 +1240,9 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
                       handleFormat('code');
                       setIsMoreMenuOpen(false);
                     }}
-                    className="flex items-center space-x-2 px-2.5 py-1.5 hover:bg-neutral-800 rounded-lg text-left"
+                    className="flex items-center space-x-2.5 px-3 py-2 hover:bg-neutral-800 rounded-lg text-left"
                   >
-                    <Code className="w-3.5 h-3.5 text-neutral-400" />
+                    <Code className="w-4 h-4 text-neutral-400" />
                     <span>Code Block</span>
                   </button>
                   <button
@@ -1191,16 +1251,17 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
                       handleFormat('quote');
                       setIsMoreMenuOpen(false);
                     }}
-                    className="flex items-center space-x-2 px-2.5 py-1.5 hover:bg-neutral-800 rounded-lg text-left"
+                    className="flex items-center space-x-2.5 px-3 py-2 hover:bg-neutral-800 rounded-lg text-left"
                   >
-                    <Quote className="w-3.5 h-3.5 text-neutral-400" />
+                    <Quote className="w-4 h-4 text-neutral-400" />
                     <span>Quote</span>
                   </button>
                 </div>
               )}
             </div>
           </div>
-        )}
+        </div>
+      )}
 
         {mode === 'wysiwyg' ? (
           <div
@@ -1289,6 +1350,130 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
             </form>
           </div>
         </div>
+      )}
+
+      {/* Slideout Drawer Window */}
+      {isSlideoutOpen && (
+        <>
+          {/* Backdrop */}
+          <div
+            onClick={() => setIsSlideoutOpen(false)}
+            className="absolute inset-0 bg-black/20 dark:bg-black/50 z-30 transition-opacity backdrop-blur-[1px]"
+          />
+
+          {/* Slideout Drawer Panel */}
+          <div className="absolute top-0 right-0 bottom-0 w-72 sm:w-80 bg-white dark:bg-neutral-900 border-l border-neutral-200 dark:border-neutral-800 shadow-2xl z-40 flex flex-col transform transition-transform duration-200 ease-in-out animate-in slide-in-from-right">
+            {/* Header */}
+            <div className="p-3.5 border-b border-neutral-200 dark:border-neutral-800 flex items-center justify-between bg-neutral-50 dark:bg-neutral-950">
+              <span className="text-xs font-bold uppercase tracking-wider text-neutral-500 dark:text-neutral-400">
+                Note Options
+              </span>
+              <button
+                onClick={() => setIsSlideoutOpen(false)}
+                className="p-1 text-neutral-500 hover:text-black dark:hover:text-white rounded-lg hover:bg-neutral-200 dark:hover:bg-neutral-800 transition-colors"
+                title="Close Options"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Content */}
+            <div className="p-4 space-y-5 flex-1 overflow-y-auto">
+              {/* Editor Mode Selector */}
+              <div className="space-y-2">
+                <span className="block text-xs font-semibold text-neutral-800 dark:text-neutral-200">
+                  Editor Mode
+                </span>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setMode('wysiwyg')}
+                    className={`p-3 rounded-xl border text-xs font-semibold flex flex-col items-center justify-center space-y-1.5 transition-all ${
+                      mode === 'wysiwyg'
+                        ? 'bg-black text-white dark:bg-white dark:text-black border-black dark:border-white shadow-xs'
+                        : 'bg-neutral-50 dark:bg-neutral-950 text-neutral-600 dark:text-neutral-400 border-neutral-200 dark:border-neutral-800 hover:bg-neutral-100 dark:hover:bg-neutral-800'
+                    }`}
+                  >
+                    <FileText className="w-4 h-4" />
+                    <span>Rich Text</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setMode('markdown')}
+                    className={`p-3 rounded-xl border text-xs font-semibold flex flex-col items-center justify-center space-y-1.5 transition-all ${
+                      mode === 'markdown'
+                        ? 'bg-black text-white dark:bg-white dark:text-black border-black dark:border-white shadow-xs'
+                        : 'bg-neutral-50 dark:bg-neutral-950 text-neutral-600 dark:text-neutral-400 border-neutral-200 dark:border-neutral-800 hover:bg-neutral-100 dark:hover:bg-neutral-800'
+                    }`}
+                  >
+                    <Eye className="w-4 h-4" />
+                    <span>Markdown</span>
+                  </button>
+                </div>
+              </div>
+
+              <hr className="border-neutral-200 dark:border-neutral-800" />
+
+              {/* Trash / Restore Actions */}
+              <div className="space-y-2">
+                <span className="block text-xs font-semibold text-neutral-800 dark:text-neutral-200">
+                  Actions
+                </span>
+                {note.deletedAt ? (
+                  onRestoreNote && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onRestoreNote();
+                        setIsSlideoutOpen(false);
+                      }}
+                      className="w-full p-2.5 rounded-xl border border-emerald-300 dark:border-emerald-800/80 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 transition-colors flex items-center justify-center space-x-2 text-xs font-bold"
+                    >
+                      <RotateCcw className="w-4 h-4" />
+                      <span>Restore Note</span>
+                    </button>
+                  )
+                ) : (
+                  onDeleteNote && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onDeleteNote();
+                        setIsSlideoutOpen(false);
+                      }}
+                      className="w-full p-2.5 rounded-xl border border-red-200 dark:border-red-900/50 bg-red-50 dark:bg-red-950/30 text-red-600 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/50 transition-colors flex items-center justify-center space-x-2 text-xs font-bold"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                      <span>Move to Trash</span>
+                    </button>
+                  )
+                )}
+              </div>
+
+              <hr className="border-neutral-200 dark:border-neutral-800" />
+
+              {/* Note Metadata */}
+              <div className="p-3 bg-neutral-50 dark:bg-neutral-950 rounded-xl border border-neutral-200 dark:border-neutral-800 text-xs space-y-2">
+                <span className="font-semibold text-neutral-500 dark:text-neutral-400 block text-[10px] uppercase tracking-wider">
+                  Note Info
+                </span>
+                <div className="flex justify-between text-neutral-600 dark:text-neutral-400">
+                  <span>Words:</span>
+                  <span className="font-mono font-medium text-neutral-900 dark:text-neutral-100">
+                    {note.content.trim() ? note.content.trim().split(/\s+/).length : 0}
+                  </span>
+                </div>
+                <div className="flex justify-between text-neutral-600 dark:text-neutral-400">
+                  <span>Characters:</span>
+                  <span className="font-mono font-medium text-neutral-900 dark:text-neutral-100">
+                    {note.content.length}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </>
       )}
     </div>
   );
