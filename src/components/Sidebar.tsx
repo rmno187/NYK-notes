@@ -69,6 +69,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const [activeTab, setActiveTab] = useState<'notes' | 'trash'>('notes');
   const [isFolderDropdownOpen, setIsFolderDropdownOpen] = useState(false);
   const [selectedNoteIds, setSelectedNoteIds] = useState<string[]>([]);
+  const [isTagDropdownOpen, setIsTagDropdownOpen] = useState(false);
   
   const searchInputRef = useRef<HTMLInputElement>(null);
   const quickInputRef = useRef<HTMLInputElement>(null);
@@ -291,23 +292,28 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </div>
       ) : (
         /* Standard Header with Gmail-style Folder Dropdown Selector */
-        <div className="p-3 sm:p-3.5 border-b border-neutral-200 dark:border-neutral-800 flex items-center justify-between shrink-0 relative">
+        <div
+  className={`p-3 sm:p-3.5 flex items-center justify-between shrink-0 relative transition-colors ${
+    isSearchMode
+      ? 'bg-neutral-100 dark:bg-neutral-950 border-b-2 border-black dark:border-white'
+      : 'border-b border-neutral-200 dark:border-neutral-800'
+  }`}
+>
           {isSearchMode ? (
             <div className="flex items-center justify-between w-full">
               <div className="flex items-center space-x-2">
-                <div className="p-1.5 bg-black text-white dark:bg-white dark:text-black rounded-md">
+                <div className="text-black dark:text-white">
                   <Search className="w-4 h-4" />
                 </div>
-                <span className="font-bold text-sm text-neutral-900 dark:text-neutral-100">
+                <span className="font-semibold text-sm text-neutral-900 dark:text-neutral-100">
                   Search Notes
                 </span>
               </div>
               <button
                 onClick={onToggleSearchMode}
-                className="p-1.5 text-neutral-500 hover:text-black dark:hover:text-white rounded-lg bg-neutral-200/80 dark:bg-neutral-900 transition-colors flex items-center space-x-1 text-xs font-medium"
+                className="px-2 py-1 text-xs font-medium text-neutral-500 hover:text-black dark:text-neutral-400 dark:hover:text-white transition-colors"
                 title="Close Search"
               >
-                <X className="w-3.5 h-3.5" />
                 <span>Done</span>
               </button>
             </div>
@@ -379,7 +385,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               <div className="flex items-center space-x-1">
                 <button
                   onClick={onToggleSearchMode}
-                  title="Search & Filter Notes"
+                  title="Search (Ctrl+F)"
                   className="p-1.5 text-neutral-600 hover:text-black dark:text-neutral-400 dark:hover:text-white rounded-lg hover:bg-neutral-200/80 dark:hover:bg-neutral-900 transition-colors"
                 >
                   <Search className="w-4 h-4" />
@@ -402,80 +408,86 @@ export const Sidebar: React.FC<SidebarProps> = ({
       {isSearchMode ? (
         <div className="p-3 border-b border-neutral-200 dark:border-neutral-800 space-y-3 bg-neutral-100/50 dark:bg-neutral-900/30 shrink-0">
           <div className="relative">
-            <Search className="w-3.5 h-3.5 absolute left-3 top-2.5 text-neutral-400" />
+            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400 pointer-events-none" />
             <input
               ref={searchInputRef}
               type="text"
               placeholder="Search by title, text, or #tag..."
               value={searchQuery}
               onChange={(e) => onSearchChange(e.target.value)}
-              className="w-full pl-8 pr-8 py-1.5 bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-700 rounded-lg text-xs text-neutral-900 dark:text-neutral-100 placeholder-neutral-400 focus:outline-none focus:border-black dark:focus:border-white shadow-2xs transition-all"
+              className="w-full pl-9 pr-9 py-2.5 bg-white dark:bg-black border border-neutral-200 dark:border-neutral-800 rounded-xl text-sm text-neutral-900 dark:text-neutral-100 placeholder-neutral-400 focus:outline-none focus:border-neutral-400 dark:focus:border-neutral-600 transition-all"
             />
             {searchQuery && (
               <button
-                onClick={() => onSearchChange('')}
-                className="absolute right-2.5 top-2.5 text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200"
-              >
-                <X className="w-3.5 h-3.5" />
-              </button>
+  onClick={() => onSearchChange('')}
+  className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-black dark:hover:text-white transition-colors"
+>
+  <X className="w-4 h-4" />
+</button>
             )}
           </div>
 
           {allTags.length > 0 && (
-            <div className="space-y-1.5">
-              <div className="flex items-center justify-between">
-                <span className="text-[10px] font-semibold uppercase tracking-wider text-neutral-500 dark:text-neutral-400">
-                  Filter by Tag
-                </span>
-                {selectedTag && (
-                  <button
-                    onClick={() => onSelectTag(null)}
-                    className="text-[10px] text-neutral-500 hover:text-black dark:hover:text-white underline font-medium"
-                  >
-                    Clear Filter
-                  </button>
-                )}
-              </div>
-              <div className="flex flex-wrap gap-1 max-h-24 overflow-y-auto pr-1">
-                <button
-                  onClick={() => onSelectTag(null)}
-                  className={`px-2 py-0.5 rounded text-[11px] font-mono transition-colors ${
-                    selectedTag === null
-                      ? 'bg-black text-white dark:bg-white dark:text-black font-semibold'
-                      : 'bg-white dark:bg-neutral-900 text-neutral-600 dark:text-neutral-400 border border-neutral-200 dark:border-neutral-800 hover:bg-neutral-200'
-                  }`}
-                >
-                  All
-                </button>
-                {allTags.map((tag) => (
-                  <button
-                    key={tag}
-                    onClick={() => onSelectTag(tag === selectedTag ? null : tag)}
-                    className={`px-2 py-0.5 rounded text-[11px] font-mono transition-colors ${
-                      selectedTag === tag
-                        ? 'bg-black text-white dark:bg-white dark:text-black font-semibold'
-                        : 'bg-white dark:bg-neutral-900 text-neutral-700 dark:text-neutral-300 border border-neutral-200 dark:border-neutral-800 hover:bg-neutral-200'
-                    }`}
-                  >
-                    #{tag}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
+  <div className="relative">
+    <button
+      onClick={() => setIsTagDropdownOpen(!isTagDropdownOpen)}
+      className="flex items-center gap-1.5 text-[11px] font-medium text-neutral-500 dark:text-neutral-400 hover:text-black dark:hover:text-white transition-colors"
+    >
+      <span>{selectedTag ? `#${selectedTag}` : 'Filter by tag'}</span>
+      <ChevronDown
+        className={`w-3 h-3 transition-transform ${
+          isTagDropdownOpen ? 'rotate-180' : ''
+        }`}
+      />
+    </button>
+
+    {isTagDropdownOpen && (
+      <div className="absolute left-0 top-full mt-1.5 w-48 bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg shadow-lg z-50 py-1">
+        {selectedTag && (
+          <button
+            onClick={() => {
+              onSelectTag(null);
+              setIsTagDropdownOpen(false);
+            }}
+            className="w-full px-3 py-1.5 text-left text-[11px] text-neutral-500 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+          >
+            Clear tag filter
+          </button>
+        )}
+
+        {allTags.map((tag) => (
+          <button
+            key={tag}
+            onClick={() => {
+              onSelectTag(tag === selectedTag ? null : tag);
+              setIsTagDropdownOpen(false);
+            }}
+            className={`w-full px-3 py-1.5 text-left text-[11px] font-mono transition-colors ${
+              selectedTag === tag
+                ? 'bg-neutral-100 dark:bg-neutral-800 text-black dark:text-white font-semibold'
+                : 'text-neutral-600 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800'
+            }`}
+          >
+            #{tag}
+          </button>
+        ))}
+      </div>
+    )}
+  </div>
+)}
         </div>
       ) : (
         /* NORMAL VIEW: Immediate Note Creator */
         <div className="p-3 space-y-2 shrink-0">
           <form onSubmit={handleQuickSubmit} className="relative flex items-center">
-            <Plus className="w-4 h-4 absolute left-3 text-neutral-400 pointer-events-none" />
+            <Plus className="w-4 h-4 absolute left-3 text-neutral-600 dark:text-neutral-300 pointer-events-none" />
             <input
               ref={quickInputRef}
               type="text"
               placeholder="Type to start a new note..."
               value={quickText}
               onChange={(e) => setQuickText(e.target.value)}
-              className="w-full pl-9 pr-8 py-2 bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg text-xs text-neutral-900 dark:text-neutral-100 placeholder-neutral-400 focus:outline-none focus:border-black dark:focus:border-white shadow-2xs transition-all"
+              className="w-full pl-9 pr-8 py-2.5 bg-neutral-100 dark:bg-neutral-900 border border-transparent rounded-lg text-sm text-neutral-900 dark:text-neutral-100 placeholder-neutral-500 dark:placeholder-neutral-500 focus:outline-none focus:bg-white dark:focus:bg-black focus:border-neutral-300 dark:focus:border-neutral-700 transition-all"
             />
             {quickText.trim() ? (
               <button
@@ -495,7 +507,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       )}
 
       {/* Notes / Trash List */}
-      <div className="flex-1 overflow-y-auto p-2 space-y-1">
+      <div className="flex-1 overflow-y-auto px-2">
         {activeTab === 'trash' && (
           <div className="mb-2 p-2.5 bg-neutral-100 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg text-xs">
             <div className="flex items-center justify-between font-semibold text-neutral-800 dark:text-neutral-200 mb-1">
@@ -555,25 +567,25 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 onTouchEnd={handlePressEnd}
                 onContextMenu={(e) => handleContextMenu(note.id, e)}
                 onClick={() => handleNoteClick(note.id)}
-                className={`group relative p-2.5 rounded-lg border cursor-pointer transition-all flex items-start space-x-2.5 ${
+                className={`group relative px-2.5 py-4 cursor-pointer transition-all flex items-start space-x-2.5 ${
   isSelected
-    ? 'bg-blue-50/80 dark:bg-blue-950/40 border-blue-500 dark:border-blue-400 text-blue-950 dark:text-blue-100 shadow-2xs'
+    ? 'bg-blue-50/80 dark:bg-blue-950/40 border-blue-500 dark:border-blue-400 text-blue-950 dark:text-blue-100'
     : isActive
-    ? 'bg-white dark:bg-neutral-900 border-transparent text-black dark:text-white border-b-4 border-b-black dark:border-b-white rounded-b-none'
-    : 'bg-transparent border-transparent text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-900/60'
+    ? 'border-b-4 border-b-black dark:border-b-white text-black dark:text-white'
+    : 'text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100/60 dark:hover:bg-neutral-900/60'
 }`}
               >
                 
-                <div className="flex-1 min-w-0">
+                <div className="flex-1 min-w-0 ">
                   <div className="flex items-center justify-between gap-1">
                     {/* Render Title if present */}
                     {noteTitle ? (
-                      <h3 className="text-xs font-bold truncate flex-1 min-w-0">
+                      <h3 className="note-title font-bold truncate flex-1 min-w-0">
                         {noteTitle}
                       </h3>
                     ) : (
                       /* If NO title, display rendered preview directly as paragraph text */
-                      <div className="flex-1 min-w-0">
+                      <div className="mt-1 note-preview">
                         <NotePreview
                           content={note.content}
                           
@@ -589,7 +601,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
                   {/* Show snippet on second line if note HAS a title */}
                   {noteTitle && (
-                    <div className="mt-1">
+                    <div className="mt-1 text-sm">
                       <NotePreview
                         content={note.content}
                         

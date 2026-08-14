@@ -2,6 +2,17 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
+/*general fonts*/
+.note-title {
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+}
+
+.note-preview {
+  font-size: 0.875rem;
+  line-height: 1.4;
+}
+
 /* Rich Typography Styles for WYSIWYG Editor */
 .editor-wysiwyg {
   line-height: 1.7;
