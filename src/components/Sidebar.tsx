@@ -158,12 +158,22 @@ export const Sidebar: React.FC<SidebarProps> = ({
   });
 
   // Long press & selection handlers
-  const handlePressStart = useCallback((id: string) => {
+  const pressStartRef = useRef({ x: 0, y: 0 });
+
+const handlePressStart = useCallback(
+  (id: string, e: React.MouseEvent | React.TouchEvent) => {
     isLongPressRef.current = false;
 
     if (longPressTimerRef.current) {
       clearTimeout(longPressTimerRef.current);
     }
+
+    const point = 'touches' in e ? e.touches[0] : e;
+
+    pressStartRef.current = {
+      x: point.clientX,
+      y: point.clientY,
+    };
 
     longPressTimerRef.current = setTimeout(() => {
       isLongPressRef.current = true;
@@ -171,15 +181,36 @@ export const Sidebar: React.FC<SidebarProps> = ({
       setSelectedNoteIds((prev) =>
         prev.includes(id) ? prev : [...prev, id]
       );
-    }, 750);
-  }, []);
+    }, 500);
+  },
+  []
+);
 
-  const handlePressEnd = useCallback(() => {
-    if (longPressTimerRef.current) {
+const handlePressMove = useCallback(
+  (e: React.MouseEvent | React.TouchEvent) => {
+    if (!longPressTimerRef.current) return;
+
+    const point = 'touches' in e ? e.touches[0] : e;
+
+    const dx = point.clientX - pressStartRef.current.x;
+    const dy = point.clientY - pressStartRef.current.y;
+
+    // Cancel long press if the user moves more than 8px.
+    if (Math.sqrt(dx * dx + dy * dy) > 8) {
       clearTimeout(longPressTimerRef.current);
       longPressTimerRef.current = null;
     }
-  }, []);
+  },
+  []
+);
+
+const handlePressEnd = useCallback(() => {
+  if (longPressTimerRef.current) {
+    clearTimeout(longPressTimerRef.current);
+    longPressTimerRef.current = null;
+  }
+}, []);
+
 
   const handleNoteClick = (id: string) => {
     if (isLongPressRef.current) {
@@ -709,20 +740,19 @@ export const Sidebar: React.FC<SidebarProps> = ({
             return (
               <div
                 key={note.id}
-                onMouseDown={() =>
-                  handlePressStart(note.id)
-                }
-                onMouseUp={handlePressEnd}
-                onMouseLeave={handlePressEnd}
-                onTouchStart={() =>
-                  handlePressStart(note.id)
-                }
-                onTouchEnd={handlePressEnd}
+                onMouseDown={(e) => handlePressStart(note.id, e)}
+onMouseMove={handlePressMove}
+onMouseUp={handlePressEnd}
+onMouseLeave={handlePressEnd}
+onTouchStart={(e) => handlePressStart(note.id, e)}
+onTouchMove={handlePressMove}
+onTouchEnd={handlePressEnd}
+
                 onContextMenu={(e) =>
                   handleContextMenu(note.id, e)
                 }
                 onClick={() => handleNoteClick(note.id)}
-                className={`group relative px-2.5 py-4 cursor-pointer transition-all flex items-start space-x-2.5 ${
+                className={`group relative px-2.5 py-4 cursor-pointer touch-pan-y transition-all flex items-start space-x-2.5 ${
                   isSelected
                     ? 'bg-blue-50/80 dark:bg-blue-950/40 border-blue-500 dark:border-blue-400 text-blue-950 dark:text-blue-100'
                     : isActive
