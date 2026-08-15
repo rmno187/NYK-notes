@@ -265,15 +265,62 @@ export default function App() {
     [activeNoteId, persistNote]
   );
 
-  // Select Note
-  const handleSelectNote = useCallback((id: string) => {
-    setActiveNoteId(id);
-    setMobileView('editor');
+  // Helper to determine if a note is completely empty
+  const isNoteEmpty = useCallback((note: Note) => {
+    const cleanTitle = note.title.trim();
+    const cleanContent = note.content
+      .replace(/<br\s*\/?>/gi, '')
+      .replace(/<p>\s*<\/p>/gi, '')
+      .replace(/<[^>]*>/g, '')
+      .trim();
+    return cleanTitle === '' && cleanContent === '';
   }, []);
+
+  const checkAndDeleteEmptyNote = useCallback(
+    (noteId: string | null) => {
+      if (!noteId) return;
+      setNotes((prev) => {
+        const target = prev.find((n) => n.id === noteId);
+        if (target && isNoteEmpty(target)) {
+          if (storageMode === 'filesystem' && directoryHandle && target.fileName) {
+            deleteNoteFromDirectory(directoryHandle, target.fileName).catch(() => {});
+          } else {
+            deleteIndexedDBNote(target.id).catch(() => {});
+          }
+          return prev.filter((n) => n.id !== noteId);
+        }
+        return prev;
+      });
+    },
+    [storageMode, directoryHandle, isNoteEmpty]
+  );
+
+  // Select Note
+  const handleSelectNote = useCallback(
+    (id: string) => {
+      if (activeNoteId && activeNoteId !== id) {
+        checkAndDeleteEmptyNote(activeNoteId);
+      }
+      setActiveNoteId(id);
+      setMobileView('editor');
+    },
+    [activeNoteId, checkAndDeleteEmptyNote]
+  );
+
+  const handleBackToList = useCallback(() => {
+    if (activeNoteId) {
+      checkAndDeleteEmptyNote(activeNoteId);
+    }
+    setMobileView('list');
+  }, [activeNoteId, checkAndDeleteEmptyNote]);
 
   // Create New Note
   const handleNewNote = useCallback(
     (initialParams?: string | { title?: string; content?: string }) => {
+      if (activeNoteId) {
+        checkAndDeleteEmptyNote(activeNoteId);
+      }
+
       let title = '';
       let content = '';
 
@@ -663,7 +710,7 @@ export default function App() {
               editorMode={editorMode}
               onChangeEditorMode={setEditorMode}
               onToggleEditorMode={handleToggleEditorMode}
-              onBackToList={() => setMobileView('list')}
+              onBackToList={handleBackToList}
               onChangeTitle={handleTitleChange}
               onChangeContent={handleContentChange}
               onTogglePin={() => handleTogglePin(activeNote.id)}

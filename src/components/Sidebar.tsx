@@ -5,24 +5,23 @@ import {
   Search,
   Pin,
   Trash2,
-  X,
   Settings,
   CornerDownLeft,
   RotateCcw,
   ArchiveX,
-  Check,
   CheckSquare,
   ChevronDown,
 } from 'lucide-react';
 import { Note } from '../types';
-import { MarkdownLogo } from './MarkdownLogo';
 import { NotePreview } from './NotePreview';
 
 interface SidebarProps {
   notes: Note[];
   activeNoteId: string | null;
   onSelectNote: (id: string) => void;
-  onNewNote: (initialParams?: string | { title?: string; content?: string }) => void;
+  onNewNote: (
+    initialParams?: string | { title?: string; content?: string }
+  ) => void;
   onDeleteNote: (id: string, e?: React.MouseEvent) => void;
   onRestoreNote: (id: string, e?: React.MouseEvent) => void;
   onEmptyTrash: () => void;
@@ -69,15 +68,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const [activeTab, setActiveTab] = useState<'notes' | 'trash'>('notes');
   const [isFolderDropdownOpen, setIsFolderDropdownOpen] = useState(false);
   const [selectedNoteIds, setSelectedNoteIds] = useState<string[]>([]);
-  const [isTagDropdownOpen, setIsTagDropdownOpen] = useState(false);
-  
+  const [isTagPanelOpen, setIsTagPanelOpen] = useState(false);
+
   const searchInputRef = useRef<HTMLInputElement>(null);
   const quickInputRef = useRef<HTMLInputElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  // Long press timer tracking
-  const longPressTimerRef = useRef<NodeJS.Timeout | null>(null);
-  const isLongPressRef = useRef<boolean>(false);
+  const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isLongPressRef = useRef(false);
 
   // Clear selections when changing tabs
   useEffect(() => {
@@ -87,12 +85,19 @@ export const Sidebar: React.FC<SidebarProps> = ({
   // Close folder dropdown on outside click
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+      if (
+        dropdownRef.current &&
+        !dropdownRef.current.contains(e.target as Node)
+      ) {
         setIsFolderDropdownOpen(false);
       }
     };
+
     document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
   }, []);
 
   // Focus search input when search mode opens
@@ -106,9 +111,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   const handleQuickSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+
     const text = quickText.trim();
+
     if (text) {
-      onNewNote({ content: `<p>${text}</p><p><br></p>` });
+      onNewNote({
+        content: `<p>${text}</p><p><br></p>`,
+      });
+
       setQuickText('');
     } else {
       onNewNote();
@@ -118,16 +128,20 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const activeNotes = notes.filter((n) => !n.deletedAt);
   const trashedNotes = notes.filter((n) => Boolean(n.deletedAt));
 
-  const currentNotesList = activeTab === 'notes' ? activeNotes : trashedNotes;
+  const currentNotesList =
+    activeTab === 'notes' ? activeNotes : trashedNotes;
 
   const filteredNotes = currentNotesList.filter((note) => {
+    const query = searchQuery.toLowerCase();
+
     const matchesSearch =
       !searchQuery ||
-      note.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      note.content.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      note.tags.some((t) => t.toLowerCase().includes(searchQuery.toLowerCase()));
+      note.title.toLowerCase().includes(query) ||
+      note.content.toLowerCase().includes(query) ||
+      note.tags.some((t) => t.toLowerCase().includes(query));
 
-    const matchesTag = !selectedTag || note.tags.includes(selectedTag);
+    const matchesTag =
+      !selectedTag || note.tags.includes(selectedTag);
 
     return matchesSearch && matchesTag;
   });
@@ -136,20 +150,28 @@ export const Sidebar: React.FC<SidebarProps> = ({
     if (activeTab === 'notes') {
       if (a.pinned && !b.pinned) return -1;
       if (!a.pinned && b.pinned) return 1;
+
       return b.updatedAt - a.updatedAt;
-    } else {
-      return (b.deletedAt || 0) - (a.deletedAt || 0);
     }
+
+    return (b.deletedAt || 0) - (a.deletedAt || 0);
   });
 
   // Long press & selection handlers
   const handlePressStart = useCallback((id: string) => {
     isLongPressRef.current = false;
-    if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
+
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current);
+    }
+
     longPressTimerRef.current = setTimeout(() => {
       isLongPressRef.current = true;
-      setSelectedNoteIds((prev) => (prev.includes(id) ? prev : [...prev, id]));
-    }, 450);
+
+      setSelectedNoteIds((prev) =>
+        prev.includes(id) ? prev : [...prev, id]
+      );
+    }, 750);
   }, []);
 
   const handlePressEnd = useCallback(() => {
@@ -166,30 +188,41 @@ export const Sidebar: React.FC<SidebarProps> = ({
     }
 
     if (selectedNoteIds.length > 0) {
-      // In selection mode: toggle selection
       setSelectedNoteIds((prev) =>
-        prev.includes(id) ? prev.filter((i) => i !== id) : [...prev, id]
+        prev.includes(id)
+          ? prev.filter((i) => i !== id)
+          : [...prev, id]
       );
     } else {
-      // Normal mode: select note
       onSelectNote(id);
     }
   };
 
-  const handleContextMenu = (id: string, e: React.MouseEvent) => {
+  const handleContextMenu = (
+    id: string,
+    e: React.MouseEvent
+  ) => {
     e.preventDefault();
     e.stopPropagation();
-    setSelectedNoteIds((prev) => (prev.includes(id) ? prev : [...prev, id]));
+
+    setSelectedNoteIds((prev) =>
+      prev.includes(id) ? prev : [...prev, id]
+    );
   };
 
-  // Check if all currently selected notes are pinned
-  const selectedNotes = sortedNotes.filter((n) => selectedNoteIds.includes(n.id));
-  const allSelectedPinned =
-    selectedNotes.length > 0 && selectedNotes.every((n) => n.pinned);
+  // Check if all selected notes are pinned
+  const selectedNotes = sortedNotes.filter((n) =>
+    selectedNoteIds.includes(n.id)
+  );
 
-  // Helper to extract clean plain text from HTML/markdown content
+  const allSelectedPinned =
+    selectedNotes.length > 0 &&
+    selectedNotes.every((n) => n.pinned);
+
+  // Helper to extract clean plain text
   const getCleanSnippet = (content: string) => {
     if (!content) return '';
+
     return content
       .replace(/<br\s*\/?>/gi, ' ')
       .replace(/<\/p>/gi, ' ')
@@ -204,36 +237,40 @@ export const Sidebar: React.FC<SidebarProps> = ({
     <aside
       className={`w-80 h-full flex flex-col bg-neutral-50 dark:bg-black border-r border-neutral-200 dark:border-neutral-800 shrink-0 select-none transition-colors duration-200 ${className}`}
     >
-      {/* Top Context Action Bar when multi-selection is active */}
+      {/* TOP CONTEXT ACTION BAR */}
       {selectedNoteIds.length > 0 ? (
-        <div className="p-3 bg-neutral-900 text-white dark:bg-neutral-900 border-b border-neutral-800 flex items-center justify-between shadow-md transition-all shrink-0">
-          <div className="flex items-center space-x-2">
-            <button
-              onClick={() => setSelectedNoteIds([])}
-              className="p-1 rounded hover:bg-neutral-800 text-neutral-300 hover:text-white transition-colors"
-              title="Cancel Selection"
-            >
-              <X className="w-4 h-4" />
-            </button>
-            <span className="text-xs font-bold font-mono">
-              {selectedNoteIds.length} Selected
-            </span>
-          </div>
+        <div className="p-3 sm:p-3.5 flex items-center justify-between shrink-0 border-b border-neutral-200 dark:border-neutral-800">
+          <button
+            onClick={() => setSelectedNoteIds([])}
+            className="px-2 py-1 rounded hover:bg-neutral-200 dark:hover:bg-neutral-800 text-neutral-600 dark:text-neutral-300 transition-colors text-xs font-medium"
+            title="Cancel Selection"
+          >
+            {selectedNoteIds.length} Selected
+          </button>
 
           <div className="flex items-center space-x-1">
             <button
               onClick={() => {
-                if (selectedNoteIds.length === sortedNotes.length) {
+                if (
+                  selectedNoteIds.length === sortedNotes.length
+                ) {
                   setSelectedNoteIds([]);
                 } else {
-                  setSelectedNoteIds(sortedNotes.map((n) => n.id));
+                  setSelectedNoteIds(
+                    sortedNotes.map((n) => n.id)
+                  );
                 }
               }}
               className="px-2 py-1 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 rounded text-xs font-medium transition-colors flex items-center"
               title="Toggle Select All"
             >
               <CheckSquare className="w-3.5 h-3.5 inline mr-1" />
-              <span>{selectedNoteIds.length === sortedNotes.length ? 'None' : 'All'}</span>
+
+              <span>
+                {selectedNoteIds.length === sortedNotes.length
+                  ? 'None'
+                  : 'All'}
+              </span>
             </button>
 
             {activeTab === 'notes' ? (
@@ -243,10 +280,23 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     onBatchTogglePin?.(selectedNoteIds);
                   }}
                   className="p-1.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 hover:text-white rounded transition-colors flex items-center space-x-1 text-xs"
-                  title={allSelectedPinned ? 'Unpin Selected' : 'Pin Selected'}
+                  title={
+                    allSelectedPinned
+                      ? 'Unpin Selected'
+                      : 'Pin Selected'
+                  }
                 >
-                  <Pin className={`w-3.5 h-3.5 ${allSelectedPinned ? 'fill-current text-blue-400' : ''}`} />
-                  <span className="hidden sm:inline">{allSelectedPinned ? 'Unpin' : 'Pin'}</span>
+                  <Pin
+                    className={`w-3.5 h-3.5 ${
+                      allSelectedPinned
+                        ? 'fill-current text-blue-400'
+                        : ''
+                    }`}
+                  />
+
+                  <span className="hidden sm:inline">
+                    {allSelectedPinned ? 'Unpin' : 'Pin'}
+                  </span>
                 </button>
 
                 <button
@@ -258,7 +308,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   title="Delete Selected Notes"
                 >
                   <Trash2 className="w-3.5 h-3.5" />
-                  <span className="hidden sm:inline">Delete</span>
+
+                  <span className="hidden sm:inline">
+                    Delete
+                  </span>
                 </button>
               </>
             ) : (
@@ -272,7 +325,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   title="Restore Selected Notes"
                 >
                   <RotateCcw className="w-3.5 h-3.5" />
-                  <span className="hidden sm:inline">Restore</span>
+
+                  <span className="hidden sm:inline">
+                    Restore
+                  </span>
                 </button>
 
                 <button
@@ -284,77 +340,94 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   title="Delete Permanently"
                 >
                   <Trash2 className="w-3.5 h-3.5" />
-                  <span className="hidden sm:inline">Delete</span>
+
+                  <span className="hidden sm:inline">
+                    Delete
+                  </span>
                 </button>
               </>
             )}
           </div>
         </div>
       ) : (
-        /* Standard Header with Gmail-style Folder Dropdown Selector */
+        /* STANDARD HEADER */
         <div
-  className={`p-3 sm:p-3.5 flex items-center justify-between shrink-0 relative transition-colors ${
-    isSearchMode
-      ? 'bg-neutral-100 dark:bg-neutral-950 border-b-2 border-black dark:border-white'
-      : 'border-b border-neutral-200 dark:border-neutral-800'
-  }`}
->
+          className={`p-3 sm:p-3.5 flex items-center justify-between shrink-0 relative transition-colors ${
+            isSearchMode
+              ? 'bg-neutral-100 dark:bg-neutral-950 border-b-2 border-black dark:border-white'
+              : 'border-b border-neutral-200 dark:border-neutral-800'
+          }`}
+        >
           {isSearchMode ? (
             <div className="flex items-center justify-between w-full">
               <div className="flex items-center space-x-2">
                 <div className="text-black dark:text-white">
                   <Search className="w-4 h-4" />
                 </div>
+
                 <span className="font-semibold text-sm text-neutral-900 dark:text-neutral-100">
                   Search Notes
                 </span>
               </div>
+
               <button
                 onClick={onToggleSearchMode}
                 className="px-2 py-1 text-xs font-medium text-neutral-500 hover:text-black dark:text-neutral-400 dark:hover:text-white transition-colors"
                 title="Close Search"
               >
-                <span>Done</span>
+                Done
               </button>
             </div>
           ) : (
             <>
-              {/* Folder Selector Dropdown Button (Gmail Style) */}
-              <div className="relative" ref={dropdownRef}>
+              {/* FOLDER SELECTOR */}
+              <div
+                className="relative"
+                ref={dropdownRef}
+              >
                 <button
-                  onClick={() => setIsFolderDropdownOpen(!isFolderDropdownOpen)}
+                  onClick={() =>
+                    setIsFolderDropdownOpen(
+                      !isFolderDropdownOpen
+                    )
+                  }
                   className="flex items-center space-x-2 px-2.5 py-1.5 rounded-lg border border-neutral-200 dark:border-neutral-800 hover:bg-neutral-200/60 dark:hover:bg-neutral-900 text-neutral-900 dark:text-neutral-100 transition-all text-xs font-bold"
                 >
                   <div className="w-5 h-5 rounded bg-black text-white dark:bg-white dark:text-black flex items-center justify-center p-0.5">
-  <img
-    src="/logo.svg"
-    alt="Logo"
-    className="w-full h-full object-contain"
-  />
-</div>
-                  <span>{activeTab === 'notes' ? 'Notes' : 'Trash'}</span>
-                  <span className="text-[1px] px-1.5 py-0.2 rounded-full bg-neutral-200 dark:bg-neutral-800 font-mono text-neutral-600 dark:text-neutral-300">
-                    {activeTab === 'notes' ? activeNotes.length : trashedNotes.length}
+                    <img
+  src="/logo.svg"
+  alt=""
+  className="w-3.5 h-3.5 object-contain"
+/>
+                  </div>
+
+                  <span>
+                    {activeTab === 'notes'
+                      ? 'Notes'
+                      : 'Trash'}
                   </span>
-                  <ChevronDown className={`w-3.5 h-3.5 text-neutral-400 transition-transform ${isFolderDropdownOpen ? 'rotate-180' : ''}`} />
+
+                  <ChevronDown className="w-3.5 h-3.5 text-neutral-400" />
                 </button>
 
-                {/* Dropdown Menu */}
                 {isFolderDropdownOpen && (
-                  <div className="absolute top-full left-0 mt-1.5 w-48 bg-white dark:bg-neutral-900 rounded-xl shadow-xl border border-neutral-200 dark:border-neutral-800 py-1.5 z-50 text-xs animate-in fade-in slide-in-from-top-1 duration-150">
+                  <div className="absolute top-full left-0 mt-1.5 w-48 bg-white dark:bg-neutral-900 rounded-xl shadow-xl border border-neutral-200 dark:border-neutral-800 py-1.5 z-50 text-xs">
                     <button
                       onClick={() => {
                         setActiveTab('notes');
                         setIsFolderDropdownOpen(false);
                       }}
                       className={`w-full px-3 py-2 text-left flex items-center justify-between hover:bg-neutral-100 dark:hover:bg-neutral-800/80 transition-colors ${
-                        activeTab === 'notes' ? 'font-bold text-neutral-900 dark:text-neutral-100 bg-neutral-50 dark:bg-neutral-800/40' : 'text-neutral-600 dark:text-neutral-400'
+                        activeTab === 'notes'
+                          ? 'font-bold text-neutral-900 dark:text-neutral-100 bg-neutral-50 dark:bg-neutral-800/40'
+                          : 'text-neutral-600 dark:text-neutral-400'
                       }`}
                     >
                       <div className="flex items-center space-x-2">
                         <FileText className="w-4 h-4 text-neutral-500" />
                         <span>Notes</span>
                       </div>
+
                       <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-neutral-100 dark:bg-neutral-800">
                         {activeNotes.length}
                       </span>
@@ -366,13 +439,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
                         setIsFolderDropdownOpen(false);
                       }}
                       className={`w-full px-3 py-2 text-left flex items-center justify-between hover:bg-neutral-100 dark:hover:bg-neutral-800/80 transition-colors ${
-                        activeTab === 'trash' ? 'font-bold text-neutral-900 dark:text-neutral-100 bg-neutral-50 dark:bg-neutral-800/40' : 'text-neutral-600 dark:text-neutral-400'
+                        activeTab === 'trash'
+                          ? 'font-bold text-neutral-900 dark:text-neutral-100 bg-neutral-50 dark:bg-neutral-800/40'
+                          : 'text-neutral-600 dark:text-neutral-400'
                       }`}
                     >
                       <div className="flex items-center space-x-2">
                         <Trash2 className="w-4 h-4 text-neutral-500" />
                         <span>Trash</span>
                       </div>
+
                       <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-neutral-100 dark:bg-neutral-800 text-red-600 dark:text-red-400">
                         {trashedNotes.length}
                       </span>
@@ -381,7 +457,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 )}
               </div>
 
-              {/* Action Buttons: Search & Settings */}
+              {/* SEARCH + SETTINGS */}
               <div className="flex items-center space-x-1">
                 <button
                   onClick={onToggleSearchMode}
@@ -404,91 +480,145 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </div>
       )}
 
-      {/* SEARCH MODE VIEW */}
+      {/* SEARCH MODE */}
       {isSearchMode ? (
-        <div className="p-3 border-b border-neutral-200 dark:border-neutral-800 space-y-3 bg-neutral-100/50 dark:bg-neutral-900/30 shrink-0">
-          <div className="relative">
-            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400 pointer-events-none" />
-            <input
-              ref={searchInputRef}
-              type="text"
-              placeholder="Search by title, text, or #tag..."
-              value={searchQuery}
-              onChange={(e) => onSearchChange(e.target.value)}
-              className="w-full pl-9 pr-9 py-2.5 bg-white dark:bg-black border border-neutral-200 dark:border-neutral-800 rounded-xl text-sm text-neutral-900 dark:text-neutral-100 placeholder-neutral-400 focus:outline-none focus:border-neutral-400 dark:focus:border-neutral-600 transition-all"
-            />
-            {searchQuery && (
-              <button
-  onClick={() => onSearchChange('')}
-  className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-black dark:hover:text-white transition-colors"
->
-  <X className="w-4 h-4" />
-</button>
+        <div className="border-b border-neutral-200 dark:border-neutral-800 bg-neutral-100/50 dark:bg-neutral-900/30 shrink-0">
+          <div className="p-3 space-y-2">
+            {/* SEARCH BAR */}
+            <div className="relative">
+              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400 pointer-events-none" />
+
+              <input
+                ref={searchInputRef}
+                type="text"
+                placeholder="Search title, text, or #tag..."
+                value={searchQuery}
+                onChange={(e) =>
+                  onSearchChange(e.target.value)
+                }
+                className="w-full pl-9 pr-20 py-2.5 bg-white dark:bg-black border border-neutral-200 dark:border-neutral-800 rounded-xl text-sm text-neutral-900 dark:text-neutral-100 placeholder-neutral-400 focus:outline-none focus:border-neutral-400 dark:focus:border-neutral-600 transition-all"
+              />
+
+              {/* CLEAR SEARCH */}
+              {searchQuery && (
+                <button
+                  onClick={() => onSearchChange('')}
+                  className="absolute right-10 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-black dark:hover:text-white transition-colors"
+                  title="Clear Search"
+                >
+                  <span className="text-sm">×</span>
+                </button>
+              )}
+
+              {/* TAG TOGGLE */}
+              {allTags.length > 0 && (
+                <button
+                  onClick={() =>
+                    setIsTagPanelOpen(!isTagPanelOpen)
+                  }
+                  className={`absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-md transition-all ${
+                    isTagPanelOpen || selectedTag
+                      ? 'text-black dark:text-white bg-neutral-100 dark:bg-neutral-800'
+                      : 'text-neutral-400 hover:text-black dark:hover:text-white hover:bg-neutral-100 dark:hover:bg-neutral-800'
+                  }`}
+                  title="Filter by tag"
+                >
+                  <ChevronDown
+                    className={`w-4 h-4 transition-transform duration-200 ${
+                      isTagPanelOpen
+                        ? 'rotate-180'
+                        : ''
+                    }`}
+                  />
+                </button>
+              )}
+            </div>
+
+            {/* SLIDE-OUT TAG PANEL */}
+            {allTags.length > 0 && (
+              <div
+                className={`grid transition-all duration-200 ease-out ${
+                  isTagPanelOpen
+                    ? 'grid-rows-[1fr] opacity-100'
+                    : 'grid-rows-[0fr] opacity-0'
+                }`}
+              >
+                <div className="overflow-hidden">
+                  <div className="pt-2">
+                    <div className="flex items-center justify-between mb-1.5">
+                      <span className="text-[10px] font-semibold uppercase tracking-wider text-neutral-500 dark:text-neutral-400">
+                        Filter by Tag
+                      </span>
+
+                      {selectedTag && (
+                        <button
+                          onClick={() => onSelectTag(null)}
+                          className="text-[10px] text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 transition-colors"
+                        >
+                          Clear
+                        </button>
+                      )}
+                    </div>
+
+                    <div className="flex flex-wrap gap-1 max-h-24 overflow-y-auto pr-1">
+                      {allTags.map((tag) => (
+                        <button
+                          key={tag}
+                          onClick={() =>
+                            onSelectTag(
+                              tag === selectedTag
+                                ? null
+                                : tag
+                            )
+                          }
+                          className={`px-2 py-0.5 rounded text-[11px] font-mono transition-colors ${
+                            selectedTag === tag
+                              ? 'bg-black text-white dark:bg-white dark:text-black font-semibold'
+                              : 'bg-white dark:bg-neutral-900 text-neutral-700 dark:text-neutral-300 border border-neutral-200 dark:border-neutral-800 hover:bg-neutral-200 dark:hover:bg-neutral-800'
+                          }`}
+                        >
+                          #{tag}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ACTIVE TAG INDICATOR WHEN PANEL IS CLOSED */}
+            {!isTagPanelOpen && selectedTag && (
+              <div className="flex items-center">
+                <button
+                  onClick={() => onSelectTag(null)}
+                  className="text-[10px] font-mono px-2 py-0.5 bg-black text-white dark:bg-white dark:text-black rounded"
+                >
+                  #{selectedTag} ×
+                </button>
+              </div>
             )}
           </div>
-
-          {allTags.length > 0 && (
-  <div className="relative">
-    <button
-      onClick={() => setIsTagDropdownOpen(!isTagDropdownOpen)}
-      className="flex items-center gap-1.5 text-[11px] font-medium text-neutral-500 dark:text-neutral-400 hover:text-black dark:hover:text-white transition-colors"
-    >
-      <span>{selectedTag ? `#${selectedTag}` : 'Filter by tag'}</span>
-      <ChevronDown
-        className={`w-3 h-3 transition-transform ${
-          isTagDropdownOpen ? 'rotate-180' : ''
-        }`}
-      />
-    </button>
-
-    {isTagDropdownOpen && (
-      <div className="absolute left-0 top-full mt-1.5 w-48 bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg shadow-lg z-50 py-1">
-        {selectedTag && (
-          <button
-            onClick={() => {
-              onSelectTag(null);
-              setIsTagDropdownOpen(false);
-            }}
-            className="w-full px-3 py-1.5 text-left text-[11px] text-neutral-500 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800"
-          >
-            Clear tag filter
-          </button>
-        )}
-
-        {allTags.map((tag) => (
-          <button
-            key={tag}
-            onClick={() => {
-              onSelectTag(tag === selectedTag ? null : tag);
-              setIsTagDropdownOpen(false);
-            }}
-            className={`w-full px-3 py-1.5 text-left text-[11px] font-mono transition-colors ${
-              selectedTag === tag
-                ? 'bg-neutral-100 dark:bg-neutral-800 text-black dark:text-white font-semibold'
-                : 'text-neutral-600 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800'
-            }`}
-          >
-            #{tag}
-          </button>
-        ))}
-      </div>
-    )}
-  </div>
-)}
         </div>
       ) : (
-        /* NORMAL VIEW: Immediate Note Creator */
+        /* NORMAL VIEW: QUICK NOTE CREATOR */
         <div className="p-3 space-y-2 shrink-0">
-          <form onSubmit={handleQuickSubmit} className="relative flex items-center">
+          <form
+            onSubmit={handleQuickSubmit}
+            className="relative flex items-center"
+          >
             <Plus className="w-4 h-4 absolute left-3 text-neutral-600 dark:text-neutral-300 pointer-events-none" />
+
             <input
               ref={quickInputRef}
               type="text"
               placeholder="Type to start a new note..."
               value={quickText}
-              onChange={(e) => setQuickText(e.target.value)}
+              onChange={(e) =>
+                setQuickText(e.target.value)
+              }
               className="w-full pl-9 pr-8 py-2.5 bg-neutral-100 dark:bg-neutral-900 border border-transparent rounded-lg text-sm text-neutral-900 dark:text-neutral-100 placeholder-neutral-500 dark:placeholder-neutral-500 focus:outline-none focus:bg-white dark:focus:bg-black focus:border-neutral-300 dark:focus:border-neutral-700 transition-all"
             />
+
             {quickText.trim() ? (
               <button
                 type="submit"
@@ -506,12 +636,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </div>
       )}
 
-      {/* Notes / Trash List */}
+      {/* NOTES / TRASH LIST */}
       <div className="flex-1 overflow-y-auto px-2">
+        {/* TRASH INFO */}
         {activeTab === 'trash' && (
           <div className="mb-2 p-2.5 bg-neutral-100 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg text-xs">
             <div className="flex items-center justify-between font-semibold text-neutral-800 dark:text-neutral-200 mb-1">
               <span>Trash Bin</span>
+
               {trashedNotes.length > 0 && (
                 <button
                   onClick={onEmptyTrash}
@@ -521,17 +653,20 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 </button>
               )}
             </div>
+
             <p className="text-[11px] text-neutral-500 dark:text-neutral-400">
               Deleted items permanently expire after 30 days.
             </p>
           </div>
         )}
 
+        {/* EMPTY STATE */}
         {sortedNotes.length === 0 ? (
           <div className="py-12 text-center px-4">
             {activeTab === 'trash' ? (
               <>
                 <ArchiveX className="w-8 h-8 text-neutral-300 dark:text-neutral-700 mx-auto mb-2" />
+
                 <p className="text-xs font-medium text-neutral-500 dark:text-neutral-400">
                   Trash is empty
                 </p>
@@ -539,20 +674,34 @@ export const Sidebar: React.FC<SidebarProps> = ({
             ) : (
               <>
                 <FileText className="w-8 h-8 text-neutral-300 dark:text-neutral-700 mx-auto mb-2" />
+
                 <p className="text-xs font-medium text-neutral-500 dark:text-neutral-400">
-                  {isSearchMode ? 'No matching notes found' : 'No notes yet'}
+                  {isSearchMode
+                    ? 'No matching notes found'
+                    : 'No notes yet'}
                 </p>
               </>
             )}
           </div>
         ) : (
+          /* NOTE LIST */
           sortedNotes.map((note) => {
             const isActive = note.id === activeNoteId;
-            const isSelected = selectedNoteIds.includes(note.id);
-            const noteTitle = note.title ? note.title.trim() : '';
-            const cleanSnippet = getCleanSnippet(note.content);
+            const isSelected = selectedNoteIds.includes(
+              note.id
+            );
 
-            const formattedDate = new Date(note.createdAt || note.updatedAt).toLocaleDateString(undefined, {
+            const noteTitle = note.title
+              ? note.title.trim()
+              : '';
+
+            const cleanSnippet = getCleanSnippet(
+              note.content
+            );
+
+            const formattedDate = new Date(
+              note.createdAt || note.updatedAt
+            ).toLocaleDateString(undefined, {
               month: 'short',
               day: 'numeric',
             });
@@ -560,78 +709,89 @@ export const Sidebar: React.FC<SidebarProps> = ({
             return (
               <div
                 key={note.id}
-                onMouseDown={() => handlePressStart(note.id)}
+                onMouseDown={() =>
+                  handlePressStart(note.id)
+                }
                 onMouseUp={handlePressEnd}
                 onMouseLeave={handlePressEnd}
-                onTouchStart={() => handlePressStart(note.id)}
+                onTouchStart={() =>
+                  handlePressStart(note.id)
+                }
                 onTouchEnd={handlePressEnd}
-                onContextMenu={(e) => handleContextMenu(note.id, e)}
+                onContextMenu={(e) =>
+                  handleContextMenu(note.id, e)
+                }
                 onClick={() => handleNoteClick(note.id)}
                 className={`group relative px-2.5 py-4 cursor-pointer transition-all flex items-start space-x-2.5 ${
-  isSelected
-    ? 'bg-blue-50/80 dark:bg-blue-950/40 border-blue-500 dark:border-blue-400 text-blue-950 dark:text-blue-100'
-    : isActive
-    ? 'border-b-4 border-b-black dark:border-b-white text-black dark:text-white'
-    : 'text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100/60 dark:hover:bg-neutral-900/60'
-}`}
+                  isSelected
+                    ? 'bg-blue-50/80 dark:bg-blue-950/40 border-blue-500 dark:border-blue-400 text-blue-950 dark:text-blue-100'
+                    : isActive
+                    ? 'border-b-4 border-b-black dark:border-b-white text-black dark:text-white'
+                    : 'text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100/60 dark:hover:bg-neutral-900/60'
+                }`}
               >
-                
-                <div className="flex-1 min-w-0 ">
+                <div className="flex-1 min-w-0">
                   <div className="flex items-center justify-between gap-1">
-                    {/* Render Title if present */}
+                    {/* TITLE */}
                     {noteTitle ? (
                       <h3 className="note-title font-bold truncate flex-1 min-w-0">
                         {noteTitle}
                       </h3>
                     ) : (
-                      /* If NO title, display rendered preview directly as paragraph text */
                       <div className="mt-1 note-preview">
                         <NotePreview
                           content={note.content}
-                          
                         />
                       </div>
                     )}
 
-                    {/* Static Pin Icon indicator if note is pinned */}
-                    {note.pinned && activeTab === 'notes' && (
-                      <Pin className="w-3 h-3 text-neutral-500 dark:text-neutral-400 fill-current shrink-0 ml-1" />
-                    )}
+                    {/* PIN */}
+                    {note.pinned &&
+                      activeTab === 'notes' && (
+                        <Pin className="w-3 h-3 text-neutral-500 dark:text-neutral-400 fill-current shrink-0 ml-1" />
+                      )}
                   </div>
 
-                  {/* Show snippet on second line if note HAS a title */}
+                  {/* PREVIEW FOR TITLED NOTES */}
                   {noteTitle && (
                     <div className="mt-1 text-sm">
                       <NotePreview
                         content={note.content}
-                        
                       />
                     </div>
                   )}
 
-                  {/* Footer line with date / tags ONLY for notes tab (NOT for trash list) */}
-                  {activeTab === 'notes' && (showDates || (isSearchMode && note.tags.length > 0)) && (
-                    <div className="flex items-center justify-between mt-2 pt-1.5 border-t border-neutral-100 dark:border-neutral-800/80">
-                      {showDates ? (
-                        <span className="text-[10px] text-neutral-400 dark:text-neutral-500 font-mono">
-                          {formattedDate}
-                        </span>
-                      ) : <span />}
+                  {/* FOOTER */}
+                  {activeTab === 'notes' &&
+                    (showDates ||
+                      (isSearchMode &&
+                        note.tags.length > 0)) && (
+                      <div className="flex items-center justify-between mt-2 pt-1.5 border-t border-neutral-100 dark:border-neutral-800/80">
+                        {showDates ? (
+                          <span className="text-[10px] text-neutral-400 dark:text-neutral-500 font-mono">
+                            {formattedDate}
+                          </span>
+                        ) : (
+                          <span />
+                        )}
 
-                      {isSearchMode && note.tags.length > 0 && (
-                        <div className="flex items-center space-x-1 overflow-hidden max-w-[130px]">
-                          {note.tags.slice(0, 2).map((t) => (
-                            <span
-                              key={t}
-                              className="text-[9px] font-mono px-1.5 py-0.2 bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400 rounded truncate"
-                            >
-                              #{t}
-                            </span>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  )}
+                        {isSearchMode &&
+                          note.tags.length > 0 && (
+                            <div className="flex items-center space-x-1 overflow-hidden max-w-[130px]">
+                              {note.tags
+                                .slice(0, 2)
+                                .map((t) => (
+                                  <span
+                                    key={t}
+                                    className="text-[9px] font-mono px-1.5 py-0.2 bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400 rounded truncate"
+                                  >
+                                    #{t}
+                                  </span>
+                                ))}
+                            </div>
+                          )}
+                      </div>
+                    )}
                 </div>
               </div>
             );

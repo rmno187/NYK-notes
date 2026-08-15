@@ -25,6 +25,7 @@ import {
   Edit3,
   ChevronLeft,
   RotateCcw,
+  Copy,
 } from 'lucide-react';
 import { Note, EditorMode } from '../types';
 import { renderMarkdownToHtml, convertHtmlToMarkdown, applyFormatting } from '../lib/markdown';
@@ -114,13 +115,10 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
     }
   }, [mode]);
 
-  // Auto-focus editor body when switching or creating notes so cursor is positioned on a clean line
+  // Do not auto-focus on note switch so existing notes don't immediately open keyboard
   useEffect(() => {
-    const timer = setTimeout(() => {
-      focusContent();
-    }, 80);
-    return () => clearTimeout(timer);
-  }, [note.id, mode, focusContent]);
+    // Keep content updated when switching notes
+  }, [note.id]);
 
   // Handle direct editing in WYSIWYG contentEditable div
   const handleWysiwygInput = useCallback(() => {
@@ -262,6 +260,7 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
   const [activeFormats, setActiveFormats] = useState({
     bold: false,
     italic: false,
+    underline: false,
     heading: false,
     h2: false,
     bullet: false,
@@ -272,18 +271,76 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
     link: false,
   });
 
+  const [activeLineText, setActiveLineText] = useState('');
+  const [copiedFeedback, setCopiedFeedback] = useState(false);
+
+  const updateActiveLineText = useCallback(() => {
+    if (mode === 'wysiwyg' && wysiwygRef.current) {
+      const sel = window.getSelection();
+      if (sel && sel.anchorNode) {
+        let node: Node | null = sel.anchorNode;
+        if (node.nodeType === Node.TEXT_NODE) node = node.parentNode;
+        while (node && node !== wysiwygRef.current) {
+          const tag = (node as HTMLElement).tagName?.toUpperCase();
+          if (['P', 'H1', 'H2', 'H3', 'LI', 'BLOCKQUOTE', 'PRE', 'DIV', 'TR'].includes(tag)) {
+            const clone = (node as HTMLElement).cloneNode(true) as HTMLElement;
+            clone.querySelectorAll('input[type="checkbox"]').forEach((cb) => cb.remove());
+            const text = clone.textContent?.replace(/\s+/g, ' ').trim() || '';
+            setActiveLineText(text);
+            return;
+          }
+          node = node.parentNode;
+        }
+        setActiveLineText(sel.anchorNode.textContent?.trim() || '');
+        return;
+      }
+    } else if (mode === 'markdown' && textareaRef.current) {
+      const textarea = textareaRef.current;
+      const pos = textarea.selectionStart;
+      const lines = textarea.value.split('\n');
+      let count = 0;
+      for (const line of lines) {
+        if (pos >= count && pos <= count + line.length + 1) {
+          setActiveLineText(line.trim());
+          return;
+        }
+        count += line.length + 1;
+      }
+    }
+    setActiveLineText('');
+  }, [mode]);
+
+  useEffect(() => {
+    const handleSelectionChange = () => {
+      updateActiveLineText();
+    };
+    document.addEventListener('selectionchange', handleSelectionChange);
+    return () => {
+      document.removeEventListener('selectionchange', handleSelectionChange);
+    };
+  }, [updateActiveLineText]);
+
+  const handleQuickCopyLine = () => {
+    if (!activeLineText) return;
+    navigator.clipboard.writeText(activeLineText);
+    setCopiedFeedback(true);
+    setTimeout(() => setCopiedFeedback(false), 1500);
+  };
+
   // Check active formatting at cursor selection
   const checkActiveFormats = useCallback(() => {
     if (mode !== 'wysiwyg' || !wysiwygRef.current) return;
 
     let isBold = false;
     let isItalic = false;
+    let isUnderline = false;
     let isBullet = false;
     let isNumber = false;
 
     try {
       isBold = document.queryCommandState('bold');
       isItalic = document.queryCommandState('italic');
+      isUnderline = document.queryCommandState('underline');
       isBullet = document.queryCommandState('insertUnorderedList');
       isNumber = document.queryCommandState('insertOrderedList');
     } catch {
@@ -323,6 +380,7 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
     setActiveFormats({
       bold: isBold,
       italic: isItalic,
+      underline: isUnderline,
       heading: isHeading,
       h2: isH2,
       bullet: isBullet && !isTask,
@@ -700,10 +758,24 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
         }
       }
 
-      // Code Block (PRE or CODE): Enter on empty block or Ctrl/Cmd+Enter escapes code block to paragraph
+      // Code Block (PRE or CODE): Enter on empty block, empty line in code, or Ctrl/Cmd+Enter escapes code block to paragraph
       if (tag === 'PRE' || tag === 'CODE') {
         const text = blockNode.textContent?.replace(/[\r\n\s\u200B-\u200D\uFEFF]/g, '') || '';
-        if (text === '' || e.ctrlKey || e.metaKey) {
+        const sel = window.getSelection();
+        let isAtEmptyLineInCode = false;
+
+        if (sel && sel.rangeCount > 0) {
+          const range = sel.getRangeAt(0);
+          const preRange = document.createRange();
+          preRange.selectNodeContents(blockNode);
+          preRange.setEnd(range.startContainer, range.startOffset);
+          const textBefore = preRange.toString();
+          if (textBefore.endsWith('\n') || textBefore.endsWith('\r')) {
+            isAtEmptyLineInCode = true;
+          }
+        }
+
+        if (text === '' || isAtEmptyLineInCode || e.ctrlKey || e.metaKey) {
           e.preventDefault();
           document.execCommand('formatBlock', false, '<p>');
           handleWysiwygInput();
@@ -910,169 +982,7 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
         </div>
       </div>
 
-      {/* Formatting Toolbar */}
-      <div
-        onMouseDown={(e) => e.preventDefault()}
-        className="px-2 py-1.5 bg-neutral-50 dark:bg-neutral-950 border-b border-neutral-200 dark:border-neutral-800 flex items-center space-x-1 overflow-x-auto min-w-0 w-full shrink-0 select-none"
-      >
-        <button
-          type="button"
-          onMouseDown={(e) => e.preventDefault()}
-          onClick={() => handleFormat('bold')}
-          title="Bold (⌘B)"
-          className={`p-1.5 rounded transition-colors shrink-0 ${
-            activeFormats.bold
-              ? 'bg-neutral-900 text-white dark:bg-neutral-100 dark:text-black font-bold shadow-xs'
-              : 'text-neutral-700 dark:text-neutral-300 hover:bg-neutral-200 dark:hover:bg-neutral-800'
-          }`}
-        >
-          <Bold className="w-4 h-4" />
-        </button>
-        <button
-          type="button"
-          onMouseDown={(e) => e.preventDefault()}
-          onClick={() => handleFormat('italic')}
-          title="Italic (⌘I)"
-          className={`p-1.5 rounded transition-colors shrink-0 ${
-            activeFormats.italic
-              ? 'bg-neutral-900 text-white dark:bg-neutral-100 dark:text-black font-bold shadow-xs'
-              : 'text-neutral-700 dark:text-neutral-300 hover:bg-neutral-200 dark:hover:bg-neutral-800'
-          }`}
-        >
-          <Italic className="w-4 h-4" />
-        </button>
-        <button
-          type="button"
-          onMouseDown={(e) => e.preventDefault()}
-          onClick={() => handleFormat('heading')}
-          title="Heading 1 (⌘H)"
-          className={`p-1.5 rounded transition-colors shrink-0 ${
-            activeFormats.heading
-              ? 'bg-neutral-900 text-white dark:bg-neutral-100 dark:text-black font-bold shadow-xs'
-              : 'text-neutral-700 dark:text-neutral-300 hover:bg-neutral-200 dark:hover:bg-neutral-800'
-          }`}
-        >
-          <Heading1 className="w-4 h-4" />
-        </button>
-        <button
-          type="button"
-          onMouseDown={(e) => e.preventDefault()}
-          onClick={() => handleFormat('h2')}
-          title="Heading 2"
-          className={`p-1.5 rounded transition-colors shrink-0 ${
-            activeFormats.h2
-              ? 'bg-neutral-900 text-white dark:bg-neutral-100 dark:text-black font-bold shadow-xs'
-              : 'text-neutral-700 dark:text-neutral-300 hover:bg-neutral-200 dark:hover:bg-neutral-800'
-          }`}
-        >
-          <Heading2 className="w-4 h-4" />
-        </button>
 
-        <div className="w-px h-4 bg-neutral-300 dark:bg-neutral-800 mx-1 shrink-0" />
-
-        <button
-          type="button"
-          onMouseDown={(e) => e.preventDefault()}
-          onClick={() => handleFormat('bullet')}
-          title="Bullet List"
-          className={`p-1.5 rounded transition-colors shrink-0 ${
-            activeFormats.bullet
-              ? 'bg-neutral-900 text-white dark:bg-neutral-100 dark:text-black font-bold shadow-xs'
-              : 'text-neutral-700 dark:text-neutral-300 hover:bg-neutral-200 dark:hover:bg-neutral-800'
-          }`}
-        >
-          <List className="w-4 h-4" />
-        </button>
-        <button
-          type="button"
-          onMouseDown={(e) => e.preventDefault()}
-          onClick={() => handleFormat('number')}
-          title="Numbered List"
-          className={`p-1.5 rounded transition-colors shrink-0 ${
-            activeFormats.number
-              ? 'bg-neutral-900 text-white dark:bg-neutral-100 dark:text-black font-bold shadow-xs'
-              : 'text-neutral-700 dark:text-neutral-300 hover:bg-neutral-200 dark:hover:bg-neutral-800'
-          }`}
-        >
-          <ListOrdered className="w-4 h-4" />
-        </button>
-        <button
-          type="button"
-          onMouseDown={(e) => e.preventDefault()}
-          onClick={() => handleFormat('task')}
-          title="Task List"
-          className={`p-1.5 rounded transition-colors shrink-0 ${
-            activeFormats.task
-              ? 'bg-neutral-900 text-white dark:bg-neutral-100 dark:text-black font-bold shadow-xs'
-              : 'text-neutral-700 dark:text-neutral-300 hover:bg-neutral-200 dark:hover:bg-neutral-800'
-          }`}
-        >
-          <CheckSquare className="w-4 h-4" />
-        </button>
-
-        <div className="w-px h-4 bg-neutral-300 dark:bg-neutral-800 mx-1 shrink-0" />
-
-        <button
-          type="button"
-          onMouseDown={(e) => e.preventDefault()}
-          onClick={() => handleFormat('code')}
-          title="Code Block"
-          className={`p-1.5 rounded transition-colors shrink-0 ${
-            activeFormats.code
-              ? 'bg-neutral-900 text-white dark:bg-neutral-100 dark:text-black font-bold shadow-xs'
-              : 'text-neutral-700 dark:text-neutral-300 hover:bg-neutral-200 dark:hover:bg-neutral-800'
-          }`}
-        >
-          <Code className="w-4 h-4" />
-        </button>
-        <button
-          type="button"
-          onMouseDown={(e) => e.preventDefault()}
-          onClick={() => handleFormat('quote')}
-          title="Blockquote"
-          className={`p-1.5 rounded transition-colors shrink-0 ${
-            activeFormats.quote
-              ? 'bg-neutral-900 text-white dark:bg-neutral-100 dark:text-black font-bold shadow-xs'
-              : 'text-neutral-700 dark:text-neutral-300 hover:bg-neutral-200 dark:hover:bg-neutral-800'
-          }`}
-        >
-          <Quote className="w-4 h-4" />
-        </button>
-        <button
-          type="button"
-          onMouseDown={(e) => e.preventDefault()}
-          onClick={() => handleFormat('link')}
-          title="Insert Link"
-          className={`p-1.5 rounded transition-colors shrink-0 ${
-            activeFormats.link
-              ? 'bg-neutral-900 text-white dark:bg-neutral-100 dark:text-black font-bold shadow-xs'
-              : 'text-neutral-700 dark:text-neutral-300 hover:bg-neutral-200 dark:hover:bg-neutral-800'
-          }`}
-        >
-          <Link className="w-4 h-4" />
-        </button>
-
-        <div className="w-px h-4 bg-neutral-300 dark:bg-neutral-800 mx-1 shrink-0" />
-
-        <button
-          type="button"
-          onMouseDown={(e) => e.preventDefault()}
-          onClick={() => handleFormat('table')}
-          title="Insert Table"
-          className="p-1.5 text-neutral-700 dark:text-neutral-300 hover:bg-neutral-200 dark:hover:bg-neutral-800 rounded transition-colors shrink-0"
-        >
-          <Table className="w-4 h-4" />
-        </button>
-        <button
-          type="button"
-          onMouseDown={(e) => e.preventDefault()}
-          onClick={() => handleFormat('hr')}
-          title="Horizontal Rule"
-          className="p-1.5 text-neutral-700 dark:text-neutral-300 hover:bg-neutral-200 dark:hover:bg-neutral-800 rounded transition-colors shrink-0"
-        >
-          <Minus className="w-4 h-4" />
-        </button>
-      </div>
 
       {/* Content Area: Title + WYSIWYG or Raw Markdown */}
       <div className="flex-1 p-4 sm:p-6 overflow-y-auto relative min-w-0 w-full flex flex-col">
@@ -1093,16 +1003,15 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
           />
         </div>
 
-        {/* Bottom Keyboard-Docked Selection Bar */}
-      {hasSelection && (
+        {/* Permanent Docked Editing Toolbar */}
         <div
           style={{
             bottom: `${keyboardOffset}px`,
           }}
           onMouseDown={(e) => e.preventDefault()}
-          className="fixed inset-x-0 z-50 bg-neutral-900/95 dark:bg-neutral-800/95 text-white backdrop-blur-md border-t border-neutral-700/80 px-4 py-2 flex items-center justify-center shadow-2xl animate-in slide-in-from-bottom-2 duration-150"
+          className="fixed inset-x-0 z-50 bg-neutral-900/95 dark:bg-neutral-800/95 text-white backdrop-blur-md border-t border-neutral-700/80 px-4 py-2 flex items-center justify-center shadow-2xl animate-in slide-in-from-bottom-2 duration-150 select-none"
         >
-          <div className="flex items-center space-x-2 sm:space-x-3 max-w-xs sm:max-w-sm w-full justify-around">
+          <div className="flex items-center space-x-2 sm:space-x-3 max-w-xs sm:max-w-md w-full justify-around">
             <button
               type="button"
               onMouseDown={(e) => e.preventDefault()}
@@ -1140,7 +1049,9 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
                 }
               }}
               title="Underline"
-              className="p-2 rounded-lg transition-colors hover:bg-neutral-700/80 text-neutral-200"
+              className={`p-2 rounded-lg transition-colors hover:bg-neutral-700/80 ${
+                activeFormats.underline ? 'text-blue-400 font-bold bg-neutral-700' : 'text-neutral-200'
+              }`}
             >
               <Underline className="w-4 h-4" />
             </button>
@@ -1167,7 +1078,16 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
                 onClick={() => setIsMoreMenuOpen((prev) => !prev)}
                 title="More formatting options"
                 className={`p-2 rounded-lg transition-colors hover:bg-neutral-700/80 ${
-                  isMoreMenuOpen ? 'bg-neutral-700 text-white' : 'text-neutral-200'
+                  isMoreMenuOpen ||
+                  activeFormats.heading ||
+                  activeFormats.h2 ||
+                  activeFormats.bullet ||
+                  activeFormats.number ||
+                  activeFormats.task ||
+                  activeFormats.code ||
+                  activeFormats.quote
+                    ? 'bg-neutral-700 text-blue-400 font-bold'
+                    : 'text-neutral-200'
                 }`}
               >
                 <MoreVertical className="w-4 h-4" />
@@ -1177,7 +1097,7 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
               {isMoreMenuOpen && (
                 <div
                   onMouseDown={(e) => e.preventDefault()}
-                  className="absolute right-0 bottom-full mb-2.5 w-48 bg-neutral-900 border border-neutral-700 rounded-xl p-1.5 shadow-2xl flex flex-col space-y-0.5 text-xs text-neutral-200 z-50 animate-in fade-in slide-in-from-bottom-2 duration-100 max-h-60 overflow-y-auto"
+                  className="absolute right-0 bottom-full mb-2.5 w-52 bg-neutral-900 border border-neutral-700 rounded-xl p-1.5 shadow-2xl flex flex-col space-y-0.5 text-xs text-neutral-200 z-50 animate-in fade-in slide-in-from-bottom-2 duration-100 max-h-64 overflow-y-auto"
                 >
                   <button
                     type="button"
@@ -1185,7 +1105,9 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
                       handleFormat('heading');
                       setIsMoreMenuOpen(false);
                     }}
-                    className="flex items-center space-x-2.5 px-3 py-2 hover:bg-neutral-800 rounded-lg text-left"
+                    className={`flex items-center space-x-2.5 px-3 py-2 rounded-lg text-left transition-colors ${
+                      activeFormats.heading ? 'bg-neutral-800 text-blue-400 font-semibold' : 'text-neutral-200 hover:bg-neutral-800'
+                    }`}
                   >
                     <Heading1 className="w-4 h-4 text-neutral-400" />
                     <span>Heading 1</span>
@@ -1196,7 +1118,9 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
                       handleFormat('h2');
                       setIsMoreMenuOpen(false);
                     }}
-                    className="flex items-center space-x-2.5 px-3 py-2 hover:bg-neutral-800 rounded-lg text-left"
+                    className={`flex items-center space-x-2.5 px-3 py-2 rounded-lg text-left transition-colors ${
+                      activeFormats.h2 ? 'bg-neutral-800 text-blue-400 font-semibold' : 'text-neutral-200 hover:bg-neutral-800'
+                    }`}
                   >
                     <Heading2 className="w-4 h-4 text-neutral-400" />
                     <span>Heading 2</span>
@@ -1207,7 +1131,9 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
                       handleFormat('bullet');
                       setIsMoreMenuOpen(false);
                     }}
-                    className="flex items-center space-x-2.5 px-3 py-2 hover:bg-neutral-800 rounded-lg text-left"
+                    className={`flex items-center space-x-2.5 px-3 py-2 rounded-lg text-left transition-colors ${
+                      activeFormats.bullet ? 'bg-neutral-800 text-blue-400 font-semibold' : 'text-neutral-200 hover:bg-neutral-800'
+                    }`}
                   >
                     <List className="w-4 h-4 text-neutral-400" />
                     <span>Bullet List</span>
@@ -1218,7 +1144,9 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
                       handleFormat('number');
                       setIsMoreMenuOpen(false);
                     }}
-                    className="flex items-center space-x-2.5 px-3 py-2 hover:bg-neutral-800 rounded-lg text-left"
+                    className={`flex items-center space-x-2.5 px-3 py-2 rounded-lg text-left transition-colors ${
+                      activeFormats.number ? 'bg-neutral-800 text-blue-400 font-semibold' : 'text-neutral-200 hover:bg-neutral-800'
+                    }`}
                   >
                     <ListOrdered className="w-4 h-4 text-neutral-400" />
                     <span>Numbered List</span>
@@ -1229,7 +1157,9 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
                       handleFormat('task');
                       setIsMoreMenuOpen(false);
                     }}
-                    className="flex items-center space-x-2.5 px-3 py-2 hover:bg-neutral-800 rounded-lg text-left"
+                    className={`flex items-center space-x-2.5 px-3 py-2 rounded-lg text-left transition-colors ${
+                      activeFormats.task ? 'bg-neutral-800 text-blue-400 font-semibold' : 'text-neutral-200 hover:bg-neutral-800'
+                    }`}
                   >
                     <CheckSquare className="w-4 h-4 text-neutral-400" />
                     <span>Task List</span>
@@ -1240,7 +1170,9 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
                       handleFormat('code');
                       setIsMoreMenuOpen(false);
                     }}
-                    className="flex items-center space-x-2.5 px-3 py-2 hover:bg-neutral-800 rounded-lg text-left"
+                    className={`flex items-center space-x-2.5 px-3 py-2 rounded-lg text-left transition-colors ${
+                      activeFormats.code ? 'bg-neutral-800 text-blue-400 font-semibold' : 'text-neutral-200 hover:bg-neutral-800'
+                    }`}
                   >
                     <Code className="w-4 h-4 text-neutral-400" />
                     <span>Code Block</span>
@@ -1251,17 +1183,66 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
                       handleFormat('quote');
                       setIsMoreMenuOpen(false);
                     }}
-                    className="flex items-center space-x-2.5 px-3 py-2 hover:bg-neutral-800 rounded-lg text-left"
+                    className={`flex items-center space-x-2.5 px-3 py-2 rounded-lg text-left transition-colors ${
+                      activeFormats.quote ? 'bg-neutral-800 text-blue-400 font-semibold' : 'text-neutral-200 hover:bg-neutral-800'
+                    }`}
                   >
                     <Quote className="w-4 h-4 text-neutral-400" />
                     <span>Quote</span>
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      handleFormat('table');
+                      setIsMoreMenuOpen(false);
+                    }}
+                    className="flex items-center space-x-2.5 px-3 py-2 text-neutral-200 hover:bg-neutral-800 rounded-lg text-left transition-colors"
+                  >
+                    <Table className="w-4 h-4 text-neutral-400" />
+                    <span>Table</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      handleFormat('hr');
+                      setIsMoreMenuOpen(false);
+                    }}
+                    className="flex items-center space-x-2.5 px-3 py-2 text-neutral-200 hover:bg-neutral-800 rounded-lg text-left transition-colors"
+                  >
+                    <Minus className="w-4 h-4 text-neutral-400" />
+                    <span>Horizontal Line</span>
+                  </button>
                 </div>
               )}
             </div>
+
+            <div className="w-px h-5 bg-neutral-700 my-auto" />
+
+            {/* Quick Copy Line Button */}
+            <button
+              type="button"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={handleQuickCopyLine}
+              disabled={!activeLineText}
+              title={
+                activeLineText
+                  ? `Quick copy line: "${activeLineText.slice(0, 30)}${activeLineText.length > 30 ? '...' : ''}"`
+                  : 'Quick copy line (place cursor on a line with text)'
+              }
+              className={`p-2 rounded-lg transition-all flex items-center justify-center ${
+                activeLineText
+                  ? 'text-neutral-100 hover:bg-neutral-700/80 cursor-pointer opacity-100'
+                  : 'text-neutral-500 opacity-40 cursor-not-allowed'
+              }`}
+            >
+              {copiedFeedback ? (
+                <Check className="w-4 h-4 text-emerald-400 animate-in zoom-in-50 duration-150" />
+              ) : (
+                <Copy className="w-4 h-4" />
+              )}
+            </button>
           </div>
         </div>
-      )}
 
         {mode === 'wysiwyg' ? (
           <div
