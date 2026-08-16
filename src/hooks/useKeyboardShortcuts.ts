@@ -2,7 +2,6 @@ import { useEffect } from 'react';
 
 export interface ShortcutHandlers {
   onNewNote?: () => void;
-  onOpenCommandPalette?: () => void;
   onToggleDarkMode?: () => void;
   onToggleViewMode?: () => void;
   onSaveNote?: () => void;
@@ -24,13 +23,6 @@ export function useKeyboardShortcuts(handlers: ShortcutHandlers) {
       if (e.altKey && keyLower === 'n') {
         e.preventDefault();
         handlers.onNewNote?.();
-        return;
-      }
-
-      // Ctrl/Cmd + K -> Command Palette
-      if (isCmdOrCtrl && keyLower === 'k') {
-        e.preventDefault();
-        handlers.onOpenCommandPalette?.();
         return;
       }
 

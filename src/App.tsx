@@ -14,7 +14,6 @@ import { convertHtmlToMarkdown } from './lib/markdown';
 import { isMac, modSymbol } from './lib/platform';
 import { Sidebar } from './components/Sidebar';
 import { EditorPane } from './components/EditorPane';
-import { CommandPalette } from './components/CommandPalette';
 import { DirectorySelectorModal } from './components/DirectorySelectorModal';
 import { BackupModal } from './components/BackupModal';
 import { ShortcutsModal } from './components/ShortcutsModal';
@@ -108,11 +107,9 @@ export default function App() {
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
   
   const [isSearchMode, setIsSearchMode] = useState(false);
-  const [isSavedIndicator, setIsSavedIndicator] = useState(false);
   const [mobileView, setMobileView] = useState<'list' | 'editor'>('list');
 
   // Modals
-  const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
   const [isDirectoryModalOpen, setIsDirectoryModalOpen] = useState(false);
   const [isBackupModalOpen, setIsBackupModalOpen] = useState(false);
   const [isShortcutsModalOpen, setIsShortcutsModalOpen] = useState(false);
@@ -199,9 +196,6 @@ export default function App() {
         } else {
           await saveIndexedDBNote(updatedNote);
         }
-
-        setIsSavedIndicator(true);
-        setTimeout(() => setIsSavedIndicator(false), 1500);
       } catch (err) {
         console.error('Failed to persist note:', err);
       }
@@ -270,11 +264,13 @@ export default function App() {
 
   // Helper to determine if a note is completely empty
   const isNoteEmpty = useCallback((note: Note) => {
-    const cleanTitle = note.title.trim();
-    const cleanContent = note.content
+    const cleanTitle = (note.title || '').trim();
+    const cleanContent = (note.content || '')
+      .replace(/&nbsp;/gi, '')
       .replace(/<br\s*\/?>/gi, '')
       .replace(/<p>\s*<\/p>/gi, '')
       .replace(/<[^>]*>/g, '')
+      .replace(/\s+/g, '')
       .trim();
     return cleanTitle === '' && cleanContent === '';
   }, []);
@@ -320,10 +316,6 @@ export default function App() {
   // Create New Note
   const handleNewNote = useCallback(
     (initialParams?: string | { title?: string; content?: string }) => {
-      if (activeNoteId) {
-        checkAndDeleteEmptyNote(activeNoteId);
-      }
-
       let title = '';
       let content = '';
 
@@ -344,12 +336,27 @@ export default function App() {
         pinned: false,
       };
 
-      setNotes((prev) => [newNote, ...prev]);
+      setNotes((prev) => {
+        // Purge any empty notes so spamming Alt+N never stacks empty notes
+        const cleaned = prev.filter((n) => {
+          const empty = isNoteEmpty(n);
+          if (empty) {
+            if (storageMode === 'filesystem' && directoryHandle && n.fileName) {
+              deleteNoteFromDirectory(directoryHandle, n.fileName).catch(() => {});
+            } else {
+              deleteIndexedDBNote(n.id).catch(() => {});
+            }
+          }
+          return !empty;
+        });
+        return [newNote, ...cleaned];
+      });
+
       setActiveNoteId(newNote.id);
       setMobileView('editor');
       persistNote(newNote);
     },
-    [selectedTag, persistNote]
+    [selectedTag, persistNote, storageMode, directoryHandle, isNoteEmpty]
   );
 
   // Batch Delete Notes
@@ -656,7 +663,6 @@ export default function App() {
   // Keyboard Shortcuts Hook
   useKeyboardShortcuts({
     onNewNote: handleNewNote,
-    onOpenCommandPalette: () => setIsCommandPaletteOpen(true),
     onToggleDarkMode: handleToggleTheme,
     onToggleViewMode: handleToggleEditorMode,
     onSaveNote: () => {
@@ -668,7 +674,7 @@ export default function App() {
     onOpenBackupModal: () => setIsBackupModalOpen(true),
     onOpenShortcutsModal: () => setIsShortcutsModalOpen(true),
     onCloseModals: () => {
-      setIsCommandPaletteOpen(false);
+      setSearchQuery('');
       setIsDirectoryModalOpen(false);
       setIsBackupModalOpen(false);
       setIsShortcutsModalOpen(false);
@@ -721,16 +727,15 @@ export default function App() {
               onAddTag={handleAddTag}
               onRemoveTag={handleRemoveTag}
               allTags={allTags}
-              isSaved={isSavedIndicator}
             />
           ) : (
             <div className="flex-1 flex flex-col items-center justify-center p-8 text-center bg-white dark:bg-black">
               <h2 className="text-lg font-bold text-neutral-800 dark:text-neutral-200">No Note Selected</h2>
               <p className="text-xs text-neutral-400 mt-1 max-w-sm">
-                Select a note from the sidebar or click "New Note" ({modSymbol}{isMac ? '⇧' : '+Shift+'}N) to start writing.
+                Select a note from the sidebar or press Option+N / Alt+N to start writing.
               </p>
               <button
-                onClick={handleNewNote}
+                onClick={() => handleNewNote()}
                 className="mt-4 px-4 py-2 bg-black text-white dark:bg-white dark:text-black rounded-lg text-xs font-semibold transition-colors"
               >
                 + Create New Note
@@ -741,19 +746,6 @@ export default function App() {
       </div>
 
       {/* Overlays */}
-      <CommandPalette
-        isOpen={isCommandPaletteOpen}
-        onClose={() => setIsCommandPaletteOpen(false)}
-        notes={notes}
-        onSelectNote={handleSelectNote}
-        onNewNote={handleNewNote}
-        onToggleTheme={handleToggleTheme}
-        onToggleViewMode={handleToggleEditorMode}
-        onOpenDirectoryModal={() => setIsDirectoryModalOpen(true)}
-        onOpenBackupModal={() => setIsBackupModalOpen(true)}
-        onOpenShortcutsModal={() => setIsShortcutsModalOpen(true)}
-      />
-
       <SettingsModal
         isOpen={isSettingsModalOpen}
         onClose={() => setIsSettingsModalOpen(false)}

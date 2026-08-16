@@ -366,7 +366,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
            PRIMARY NAVIGATION & SEARCH HEADER
            ================================================== */
 
-        <div className="p-3 shrink-0 border-b border-neutral-200 dark:border-neutral-800 space-y-5">
+        <div className="p-3 shrink-0 border-b border-transparent space-y-5">
           {/* TOP ROW: LOGO/FOLDER SELECTOR + NEW NOTE + SETTINGS */}
           <div className="flex items-center justify-between gap-1.5">
             {/* INBOX / FOLDER SELECTOR WITH LOGO */}
@@ -378,20 +378,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 title="Switch Folder / Category"
               >
                 {/* LOGO BADGE */}
-                <div className="w-6 h-6 rounded-lg bg-neutral-900 dark:bg-neutral-100 text-white dark:text-black flex items-center justify-center shrink-0 font-mono font-bold text-xs shadow-xs">
-                  <svg
-                    className="w-3.5 h-3.5"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2.5"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  >
-                    <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
-                    <polyline points="14 2 14 8 20 8" />
-                  </svg>
-                </div>
+                <div className="w-6 h-6 rounded-lg overflow-hidden shrink-0">
+  <img
+    src="/logo.svg"
+    alt=""
+    className="w-full h-full object-contain"
+  />
+</div>
 
                 <span className="truncate font-sans font-bold text-xs">
                   {activeTab === 'notes'
@@ -423,7 +416,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     }`}
                   >
                     <div className="flex items-center space-x-2">
-                      <FileText className="w-4 h-4 text-neutral-500" />
+                      
                       <span>Notes</span>
                     </div>
                     <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-neutral-100 dark:bg-neutral-800">
@@ -445,7 +438,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     }`}
                   >
                     <div className="flex items-center space-x-2">
-                      <Trash2 className="w-4 h-4 text-neutral-500" />
+                      
                       <span>Trash</span>
                     </div>
                     <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-neutral-100 dark:bg-neutral-800 text-red-600 dark:text-red-400">
@@ -490,6 +483,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
     placeholder="Search notes..."
     value={searchQuery}
     onChange={(e) => onSearchChange(e.target.value)}
+    onKeyDown={(e) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        onSearchChange('');
+        (e.target as HTMLInputElement).blur();
+      }
+    }}
     className="
       w-full
       pl-5 pr-6 py-3

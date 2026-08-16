@@ -13,7 +13,6 @@ export const ShortcutsModal: React.FC<ShortcutsModalProps> = ({ isOpen, onClose 
 
   const shortcuts: KeyboardShortcut[] = [
     { combination: 'Alt/Option + N', description: 'New Note', key: 'n', category: 'General' },
-    { combination: 'Ctrl/Cmd + K', description: 'Command Palette', key: 'k', category: 'General' },
     { combination: 'Ctrl/Cmd + F', description: 'Search', key: 'f', category: 'General' },
     { combination: 'Ctrl/Cmd + Shift + D', description: 'Dark/Light', key: 'd', category: 'General' },
     { combination: 'Ctrl/Cmd + Shift + B', description: 'Encrypted Backup', key: 'b', category: 'General' },
@@ -22,6 +21,8 @@ export const ShortcutsModal: React.FC<ShortcutsModalProps> = ({ isOpen, onClose 
     { combination: 'Esc', description: 'Close/Clear', key: 'Escape', category: 'Navigation' },
     { combination: 'Shift + ?', description: 'Shortcuts', key: '?', category: 'Navigation' },
 
+    { combination: 'Ctrl/Cmd + Z', description: 'Undo', key: 'z', category: 'Editing' },
+    { combination: 'Ctrl/Cmd + Shift + Z', description: 'Redo', key: 'z', category: 'Editing' },
     { combination: 'Ctrl/Cmd + B', description: 'Bold', key: 'b', category: 'Editing' },
     { combination: 'Ctrl/Cmd + I', description: 'Italic', key: 'i', category: 'Editing' },
     { combination: 'Tab / Shift+Tab', description: 'Indent/Outdent', key: 'Tab', category: 'Editing' },
