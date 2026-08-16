@@ -113,6 +113,11 @@ export function parseMarkdownNote(rawContent: string, defaultFileName?: string) 
     }
   }
 
+  // Clean legacy raw HTML content strings if necessary
+  if (content.trim().startsWith('<p>') && content.includes('</p>')) {
+    content = convertHtmlToMarkdown(content);
+  }
+
   // Extract inline #hashtags from content (e.g., #project #todo)
   const inlineTags = extractHashtags(content);
   const combinedTags = Array.from(new Set([...tags, ...inlineTags]));
@@ -163,8 +168,16 @@ export function extractHashtags(text: string): string[] {
  */
 export function renderMarkdownToHtml(markdownContent: string): string {
   if (!markdownContent) return '';
+  let cleanMarkdown = markdownContent;
+  if (cleanMarkdown.trim().startsWith('<p>') && cleanMarkdown.includes('</p>')) {
+    cleanMarkdown = convertHtmlToMarkdown(cleanMarkdown);
+  }
   try {
-    return marked.parse(markdownContent) as string;
+    const rawHtml = marked.parse(cleanMarkdown) as string;
+    // Remove disabled attribute from checkbox inputs so they can be clicked/toggled
+    return rawHtml
+      .replace(/<input([^>]*)\sdisabled=""([^>]*)>/gi, '<input$1$2>')
+      .replace(/<input([^>]*)\sdisabled([^>]*)>/gi, '<input$1$2>');
   } catch (err) {
     return `<p class="text-red-500">Error rendering Markdown</p>`;
   }
@@ -195,7 +208,7 @@ export function applyFormatting(
   text: string,
   selectionStart: number,
   selectionEnd: number,
-  type: 'bold' | 'italic' | 'heading' | 'code' | 'quote' | 'link' | 'bullet' | 'number' | 'task' | 'table' | 'hr'
+  type: 'bold' | 'italic' | 'heading' | 'h2' | 'paragraph' | 'code' | 'quote' | 'link' | 'bullet' | 'number' | 'task' | 'table' | 'hr'
 ): { text: string; newStart: number; newEnd: number } {
   const before = text.slice(0, selectionStart);
   const selected = text.slice(selectionStart, selectionEnd) || 'text';
@@ -234,36 +247,71 @@ export function applyFormatting(
       cursorOffsetStart = selectionStart + prefix.length;
       cursorOffsetEnd = selectionEnd + prefix.length;
       break;
+    case 'paragraph':
     case 'heading':
-      prefix = '## ';
-      newText = before + prefix + selected + after;
-      cursorOffsetStart = selectionStart + prefix.length;
-      cursorOffsetEnd = selectionEnd + prefix.length;
-      break;
+    case 'h2':
     case 'quote':
-      prefix = '> ';
-      newText = before + prefix + selected + after;
-      cursorOffsetStart = selectionStart + prefix.length;
-      cursorOffsetEnd = selectionEnd + prefix.length;
-      break;
     case 'bullet':
-      prefix = '- ';
-      newText = before + prefix + selected + after;
-      cursorOffsetStart = selectionStart + prefix.length;
-      cursorOffsetEnd = selectionEnd + prefix.length;
-      break;
     case 'number':
-      prefix = '1. ';
-      newText = before + prefix + selected + after;
-      cursorOffsetStart = selectionStart + prefix.length;
-      cursorOffsetEnd = selectionEnd + prefix.length;
+    case 'task': {
+      // Find full lines covered by selection
+      const lineStart = text.lastIndexOf('\n', selectionStart - 1) + 1;
+      let lineEnd = text.indexOf('\n', selectionEnd);
+      if (lineEnd === -1) lineEnd = text.length;
+
+      const preBlock = text.slice(0, lineStart);
+      const targetLines = text.slice(lineStart, lineEnd).split('\n');
+      const postBlock = text.slice(lineEnd);
+
+      // Clean prefix regex for tasks, bullets, numbers, quotes, headings
+      const prefixRegex = /^\s*(?:-\s*\[[\s\S]?\]\s*|\[[\s\S]?\]\s*|[-*+•]\s*|\d+\.\s*|>\s*|#{1,6}\s*)/;
+
+      // Check if all lines already match target prefix
+      const isAlreadyTask = targetLines.every((l) => /^\s*(?:-\s*\[[\s\S]?\]|\[[\s\S]?\])/.test(l));
+      const isAlreadyBullet = targetLines.every((l) => /^\s*[-*+•]\s+(?!\[[\s\S]?\])/.test(l));
+      const isAlreadyNumber = targetLines.every((l) => /^\s*\d+\.\s+/.test(l));
+      const isAlreadyHeading = targetLines.every((l) => /^\s*#\s+/.test(l));
+      const isAlreadyH2 = targetLines.every((l) => /^\s*##\s+/.test(l));
+      const isAlreadyQuote = targetLines.every((l) => /^\s*>\s+/.test(l));
+
+      let isToggleOff = false;
+      if (type === 'task' && isAlreadyTask) isToggleOff = true;
+      if (type === 'bullet' && isAlreadyBullet) isToggleOff = true;
+      if (type === 'number' && isAlreadyNumber) isToggleOff = true;
+      if (type === 'heading' && isAlreadyHeading) isToggleOff = true;
+      if (type === 'h2' && isAlreadyH2) isToggleOff = true;
+      if (type === 'quote' && isAlreadyQuote) isToggleOff = true;
+      if (type === 'paragraph') isToggleOff = true;
+
+      const formattedLines = targetLines.map((line, idx) => {
+        const cleanContent = line.replace(prefixRegex, '');
+        if (isToggleOff) {
+          return cleanContent;
+        }
+        switch (type) {
+          case 'task':
+            return `- [ ] ${cleanContent}`;
+          case 'bullet':
+            return `- ${cleanContent}`;
+          case 'number':
+            return `${idx + 1}. ${cleanContent}`;
+          case 'heading':
+            return `# ${cleanContent}`;
+          case 'h2':
+            return `## ${cleanContent}`;
+          case 'quote':
+            return `> ${cleanContent}`;
+          default:
+            return cleanContent;
+        }
+      });
+
+      const joined = formattedLines.join('\n');
+      newText = preBlock + joined + postBlock;
+      cursorOffsetStart = lineStart;
+      cursorOffsetEnd = lineStart + joined.length;
       break;
-    case 'task':
-      prefix = '- [ ] ';
-      newText = before + prefix + selected + after;
-      cursorOffsetStart = selectionStart + prefix.length;
-      cursorOffsetEnd = selectionEnd + prefix.length;
-      break;
+    }
     case 'link':
       newText = before + `[${selected}](url)` + after;
       cursorOffsetStart = selectionStart + selected.length + 3;

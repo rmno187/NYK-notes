@@ -6,7 +6,6 @@ import {
   Pin,
   Trash2,
   Settings,
-  CornerDownLeft,
   RotateCcw,
   ArchiveX,
   CheckSquare,
@@ -14,6 +13,7 @@ import {
 } from 'lucide-react';
 import { Note } from '../types';
 import { NotePreview } from './NotePreview';
+import { modKey } from '../lib/platform';
 
 interface SidebarProps {
   notes: Note[];
@@ -29,14 +29,8 @@ interface SidebarProps {
   onBatchDelete?: (ids: string[]) => void;
   onBatchTogglePin?: (ids: string[]) => void;
   onBatchRestore?: (ids: string[]) => void;
-  selectedTag: string | null;
-  onSelectTag: (tag: string | null) => void;
-  allTags: string[];
   searchQuery: string;
   onSearchChange: (q: string) => void;
-  isSearchMode: boolean;
-  onToggleSearchMode: () => void;
-  showDates: boolean;
   onOpenSettingsModal: () => void;
   className?: string;
 }
@@ -46,35 +40,25 @@ export const Sidebar: React.FC<SidebarProps> = ({
   activeNoteId,
   onSelectNote,
   onNewNote,
-  onDeleteNote,
-  onRestoreNote,
   onEmptyTrash,
-  onTogglePin,
   onBatchDelete,
   onBatchTogglePin,
   onBatchRestore,
-  selectedTag,
-  onSelectTag,
-  allTags,
   searchQuery,
   onSearchChange,
-  isSearchMode,
-  onToggleSearchMode,
-  showDates,
   onOpenSettingsModal,
   className = '',
 }) => {
-  const [quickText, setQuickText] = useState('');
   const [activeTab, setActiveTab] = useState<'notes' | 'trash'>('notes');
   const [isFolderDropdownOpen, setIsFolderDropdownOpen] = useState(false);
   const [selectedNoteIds, setSelectedNoteIds] = useState<string[]>([]);
-  const [isTagPanelOpen, setIsTagPanelOpen] = useState(false);
 
   const searchInputRef = useRef<HTMLInputElement>(null);
-  const quickInputRef = useRef<HTMLInputElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const longPressTimerRef =
+    useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const isLongPressRef = useRef(false);
 
   // Clear selections when changing tabs
@@ -82,7 +66,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     setSelectedNoteIds([]);
   }, [activeTab]);
 
-  // Close folder dropdown on outside click
+  // Close folder dropdown when clicking outside
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
       if (
@@ -100,117 +84,108 @@ export const Sidebar: React.FC<SidebarProps> = ({
     };
   }, []);
 
-  // Focus search input when search mode opens
-  useEffect(() => {
-    if (isSearchMode) {
-      setTimeout(() => {
-        searchInputRef.current?.focus();
-      }, 50);
-    }
-  }, [isSearchMode]);
-
-  const handleQuickSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-
-    const text = quickText.trim();
-
-    if (text) {
-      onNewNote({
-        content: `<p>${text}</p><p><br></p>`,
-      });
-
-      setQuickText('');
-    } else {
-      onNewNote();
-    }
-  };
-
   const activeNotes = notes.filter((n) => !n.deletedAt);
   const trashedNotes = notes.filter((n) => Boolean(n.deletedAt));
 
   const currentNotesList =
     activeTab === 'notes' ? activeNotes : trashedNotes;
 
+  // --------------------------------------------------
+  // Search
+  // --------------------------------------------------
+
   const filteredNotes = currentNotesList.filter((note) => {
     const query = searchQuery.toLowerCase();
 
-    const matchesSearch =
+    return (
       !searchQuery ||
       note.title.toLowerCase().includes(query) ||
       note.content.toLowerCase().includes(query) ||
-      note.tags.some((t) => t.toLowerCase().includes(query));
-
-    const matchesTag =
-      !selectedTag || note.tags.includes(selectedTag);
-
-    return matchesSearch && matchesTag;
+      note.tags.some((t) => t.toLowerCase().includes(query))
+    );
   });
+
+  // --------------------------------------------------
+  // Sort notes
+  // --------------------------------------------------
 
   const sortedNotes = [...filteredNotes].sort((a, b) => {
     if (activeTab === 'notes') {
       if (a.pinned && !b.pinned) return -1;
       if (!a.pinned && b.pinned) return 1;
 
-      return b.updatedAt - a.updatedAt;
+      const timeA = a.updatedAt || a.createdAt || 0;
+      const timeB = b.updatedAt || b.createdAt || 0;
+      return timeB - timeA;
     }
 
     return (b.deletedAt || 0) - (a.deletedAt || 0);
   });
 
-  // Long press & selection handlers
+  // --------------------------------------------------
+  // Long press / multi-selection
+  // --------------------------------------------------
+
   const pressStartRef = useRef({ x: 0, y: 0 });
 
-const handlePressStart = useCallback(
-  (id: string, e: React.MouseEvent | React.TouchEvent) => {
-    isLongPressRef.current = false;
+  const handlePressStart = useCallback(
+    (
+      id: string,
+      e: React.MouseEvent | React.TouchEvent
+    ) => {
+      isLongPressRef.current = false;
 
+      if (longPressTimerRef.current) {
+        clearTimeout(longPressTimerRef.current);
+      }
+
+      const point =
+        'touches' in e ? e.touches[0] : e;
+
+      pressStartRef.current = {
+        x: point.clientX,
+        y: point.clientY,
+      };
+
+      longPressTimerRef.current = setTimeout(() => {
+        isLongPressRef.current = true;
+
+        setSelectedNoteIds((prev) =>
+          prev.includes(id) ? prev : [...prev, id]
+        );
+      }, 500);
+    },
+    []
+  );
+
+  const handlePressMove = useCallback(
+    (e: React.MouseEvent | React.TouchEvent) => {
+      if (!longPressTimerRef.current) return;
+
+      const point =
+        'touches' in e ? e.touches[0] : e;
+
+      const dx =
+        point.clientX - pressStartRef.current.x;
+
+      const dy =
+        point.clientY - pressStartRef.current.y;
+
+      // Cancel long press when the user starts scrolling/moving.
+      if (Math.sqrt(dx * dx + dy * dy) > 8) {
+        clearTimeout(longPressTimerRef.current);
+        longPressTimerRef.current = null;
+      }
+    },
+    []
+  );
+
+  const handlePressEnd = useCallback(() => {
     if (longPressTimerRef.current) {
-      clearTimeout(longPressTimerRef.current);
-    }
-
-    const point = 'touches' in e ? e.touches[0] : e;
-
-    pressStartRef.current = {
-      x: point.clientX,
-      y: point.clientY,
-    };
-
-    longPressTimerRef.current = setTimeout(() => {
-      isLongPressRef.current = true;
-
-      setSelectedNoteIds((prev) =>
-        prev.includes(id) ? prev : [...prev, id]
-      );
-    }, 500);
-  },
-  []
-);
-
-const handlePressMove = useCallback(
-  (e: React.MouseEvent | React.TouchEvent) => {
-    if (!longPressTimerRef.current) return;
-
-    const point = 'touches' in e ? e.touches[0] : e;
-
-    const dx = point.clientX - pressStartRef.current.x;
-    const dy = point.clientY - pressStartRef.current.y;
-
-    // Cancel long press if the user moves more than 8px.
-    if (Math.sqrt(dx * dx + dy * dy) > 8) {
       clearTimeout(longPressTimerRef.current);
       longPressTimerRef.current = null;
     }
-  },
-  []
-);
-
-const handlePressEnd = useCallback(() => {
-  if (longPressTimerRef.current) {
-    clearTimeout(longPressTimerRef.current);
-    longPressTimerRef.current = null;
-  }
-}, []);
-
+  }, []);
 
   const handleNoteClick = (id: string) => {
     if (isLongPressRef.current) {
@@ -241,7 +216,10 @@ const handlePressEnd = useCallback(() => {
     );
   };
 
-  // Check if all selected notes are pinned
+  // --------------------------------------------------
+  // Selection state
+  // --------------------------------------------------
+
   const selectedNotes = sortedNotes.filter((n) =>
     selectedNoteIds.includes(n.id)
   );
@@ -250,27 +228,21 @@ const handlePressEnd = useCallback(() => {
     selectedNotes.length > 0 &&
     selectedNotes.every((n) => n.pinned);
 
-  // Helper to extract clean plain text
-  const getCleanSnippet = (content: string) => {
-    if (!content) return '';
-
-    return content
-      .replace(/<br\s*\/?>/gi, ' ')
-      .replace(/<\/p>/gi, ' ')
-      .replace(/<[^>]*>/g, '')
-      .replace(/#+\s/g, '')
-      .replace(/[*_~`]/g, '')
-      .replace(/\s+/g, ' ')
-      .trim();
-  };
+  // --------------------------------------------------
+  // Render
+  // --------------------------------------------------
 
   return (
     <aside
       className={`w-80 h-full flex flex-col bg-neutral-50 dark:bg-black border-r border-neutral-200 dark:border-neutral-800 shrink-0 select-none transition-colors duration-200 ${className}`}
     >
-      {/* TOP CONTEXT ACTION BAR */}
+      {/* ==================================================
+          TOP BAR
+          ================================================== */}
+
       {selectedNoteIds.length > 0 ? (
-        <div className="p-3 sm:p-3.5 flex items-center justify-between shrink-0 border-b border-neutral-200 dark:border-neutral-800">
+        /* MULTI-SELECTION TOOLBAR */
+        <div className="px-3 py-3 flex items-center justify-between shrink-0 border-b border-neutral-200 dark:border-neutral-800">
           <button
             onClick={() => setSelectedNoteIds([])}
             className="px-2 py-1 rounded hover:bg-neutral-200 dark:hover:bg-neutral-800 text-neutral-600 dark:text-neutral-300 transition-colors text-xs font-medium"
@@ -280,10 +252,12 @@ const handlePressEnd = useCallback(() => {
           </button>
 
           <div className="flex items-center space-x-1">
+            {/* SELECT ALL */}
             <button
               onClick={() => {
                 if (
-                  selectedNoteIds.length === sortedNotes.length
+                  selectedNoteIds.length ===
+                  sortedNotes.length
                 ) {
                   setSelectedNoteIds([]);
                 } else {
@@ -298,7 +272,8 @@ const handlePressEnd = useCallback(() => {
               <CheckSquare className="w-3.5 h-3.5 inline mr-1" />
 
               <span>
-                {selectedNoteIds.length === sortedNotes.length
+                {selectedNoteIds.length ===
+                sortedNotes.length
                   ? 'None'
                   : 'All'}
               </span>
@@ -306,6 +281,7 @@ const handlePressEnd = useCallback(() => {
 
             {activeTab === 'notes' ? (
               <>
+                {/* PIN */}
                 <button
                   onClick={() => {
                     onBatchTogglePin?.(selectedNoteIds);
@@ -320,16 +296,19 @@ const handlePressEnd = useCallback(() => {
                   <Pin
                     className={`w-3.5 h-3.5 ${
                       allSelectedPinned
-                        ? 'fill-current text-blue-400'
+                        ? 'fill-current'
                         : ''
                     }`}
                   />
 
                   <span className="hidden sm:inline">
-                    {allSelectedPinned ? 'Unpin' : 'Pin'}
+                    {allSelectedPinned
+                      ? 'Unpin'
+                      : 'Pin'}
                   </span>
                 </button>
 
+                {/* DELETE */}
                 <button
                   onClick={() => {
                     onBatchDelete?.(selectedNoteIds);
@@ -347,6 +326,7 @@ const handlePressEnd = useCallback(() => {
               </>
             ) : (
               <>
+                {/* RESTORE */}
                 <button
                   onClick={() => {
                     onBatchRestore?.(selectedNoteIds);
@@ -362,6 +342,7 @@ const handlePressEnd = useCallback(() => {
                   </span>
                 </button>
 
+                {/* PERMANENT DELETE */}
                 <button
                   onClick={() => {
                     onBatchDelete?.(selectedNoteIds);
@@ -381,295 +362,174 @@ const handlePressEnd = useCallback(() => {
           </div>
         </div>
       ) : (
-        /* STANDARD HEADER */
-        <div
-          className={`p-3 sm:p-3.5 flex items-center justify-between shrink-0 relative transition-colors ${
-            isSearchMode
-              ? 'bg-neutral-100 dark:bg-neutral-950 border-b-2 border-black dark:border-white'
-              : 'border-b border-neutral-200 dark:border-neutral-800'
-          }`}
-        >
-          {isSearchMode ? (
-            <div className="flex items-center justify-between w-full">
-              <div className="flex items-center space-x-2">
-                <div className="text-black dark:text-white">
-                  <Search className="w-4 h-4" />
+        /* ==================================================
+           PRIMARY NAVIGATION & SEARCH HEADER
+           ================================================== */
+
+        <div className="p-3 shrink-0 border-b border-neutral-200 dark:border-neutral-800 space-y-5">
+          {/* TOP ROW: LOGO/FOLDER SELECTOR + NEW NOTE + SETTINGS */}
+          <div className="flex items-center justify-between gap-1.5">
+            {/* INBOX / FOLDER SELECTOR WITH LOGO */}
+            <div ref={dropdownRef} className="relative min-w-0 flex-1">
+              <button
+                type="button"
+                onClick={() => setIsFolderDropdownOpen(!isFolderDropdownOpen)}
+                className="flex items-center space-x-2 p-1 rounded-xl hover:bg-neutral-200/60 dark:hover:bg-neutral-800/60 transition-colors text-xs font-semibold text-neutral-900 dark:text-neutral-100 max-w-full text-left"
+                title="Switch Folder / Category"
+              >
+                {/* LOGO BADGE */}
+                <div className="w-6 h-6 rounded-lg bg-neutral-900 dark:bg-neutral-100 text-white dark:text-black flex items-center justify-center shrink-0 font-mono font-bold text-xs shadow-xs">
+                  <svg
+                    className="w-3.5 h-3.5"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
+                    <polyline points="14 2 14 8 20 8" />
+                  </svg>
                 </div>
 
-                <span className="font-semibold text-sm text-neutral-900 dark:text-neutral-100">
-                  Search Notes
+                <span className="truncate font-sans font-bold text-xs">
+                  {activeTab === 'notes'
+                    ? `Notes (${activeNotes.length})`
+                    : `Trash (${trashedNotes.length})`}
                 </span>
-              </div>
 
-              <button
-                onClick={onToggleSearchMode}
-                className="px-2 py-1 text-xs font-medium text-neutral-500 hover:text-black dark:text-neutral-400 dark:hover:text-white transition-colors"
-                title="Close Search"
-              >
-                Done
-              </button>
-            </div>
-          ) : (
-            <>
-              {/* FOLDER SELECTOR */}
-              <div
-                className="relative"
-                ref={dropdownRef}
-              >
-                <button
-                  onClick={() =>
-                    setIsFolderDropdownOpen(
-                      !isFolderDropdownOpen
-                    )
-                  }
-                  className="flex items-center space-x-2 px-2.5 py-1.5 rounded-lg border border-neutral-200 dark:border-neutral-800 hover:bg-neutral-200/60 dark:hover:bg-neutral-900 text-neutral-900 dark:text-neutral-100 transition-all text-xs font-bold"
-                >
-                  <div className="w-5 h-5 rounded bg-black text-white dark:bg-white dark:text-black flex items-center justify-center p-0.5">
-                    <img
-  src="/logo.svg"
-  alt=""
-  className="w-3.5 h-3.5 object-contain"
-/>
-                  </div>
-
-                  <span>
-                    {activeTab === 'notes'
-                      ? 'Notes'
-                      : 'Trash'}
-                  </span>
-
-                  <ChevronDown className="w-3.5 h-3.5 text-neutral-400" />
-                </button>
-
-                {isFolderDropdownOpen && (
-                  <div className="absolute top-full left-0 mt-1.5 w-48 bg-white dark:bg-neutral-900 rounded-xl shadow-xl border border-neutral-200 dark:border-neutral-800 py-1.5 z-50 text-xs">
-                    <button
-                      onClick={() => {
-                        setActiveTab('notes');
-                        setIsFolderDropdownOpen(false);
-                      }}
-                      className={`w-full px-3 py-2 text-left flex items-center justify-between hover:bg-neutral-100 dark:hover:bg-neutral-800/80 transition-colors ${
-                        activeTab === 'notes'
-                          ? 'font-bold text-neutral-900 dark:text-neutral-100 bg-neutral-50 dark:bg-neutral-800/40'
-                          : 'text-neutral-600 dark:text-neutral-400'
-                      }`}
-                    >
-                      <div className="flex items-center space-x-2">
-                        <FileText className="w-4 h-4 text-neutral-500" />
-                        <span>Notes</span>
-                      </div>
-
-                      <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-neutral-100 dark:bg-neutral-800">
-                        {activeNotes.length}
-                      </span>
-                    </button>
-
-                    <button
-                      onClick={() => {
-                        setActiveTab('trash');
-                        setIsFolderDropdownOpen(false);
-                      }}
-                      className={`w-full px-3 py-2 text-left flex items-center justify-between hover:bg-neutral-100 dark:hover:bg-neutral-800/80 transition-colors ${
-                        activeTab === 'trash'
-                          ? 'font-bold text-neutral-900 dark:text-neutral-100 bg-neutral-50 dark:bg-neutral-800/40'
-                          : 'text-neutral-600 dark:text-neutral-400'
-                      }`}
-                    >
-                      <div className="flex items-center space-x-2">
-                        <Trash2 className="w-4 h-4 text-neutral-500" />
-                        <span>Trash</span>
-                      </div>
-
-                      <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-neutral-100 dark:bg-neutral-800 text-red-600 dark:text-red-400">
-                        {trashedNotes.length}
-                      </span>
-                    </button>
-                  </div>
-                )}
-              </div>
-
-              {/* SEARCH + SETTINGS */}
-              <div className="flex items-center space-x-1">
-                <button
-                  onClick={onToggleSearchMode}
-                  title="Search (Ctrl+F)"
-                  className="p-1.5 text-neutral-600 hover:text-black dark:text-neutral-400 dark:hover:text-white rounded-lg hover:bg-neutral-200/80 dark:hover:bg-neutral-900 transition-colors"
-                >
-                  <Search className="w-4 h-4" />
-                </button>
-
-                <button
-                  onClick={onOpenSettingsModal}
-                  title="Open Settings"
-                  className="p-1.5 text-neutral-600 hover:text-black dark:text-neutral-400 dark:hover:text-white rounded-lg hover:bg-neutral-200/80 dark:hover:bg-neutral-900 transition-colors"
-                >
-                  <Settings className="w-4 h-4" />
-                </button>
-              </div>
-            </>
-          )}
-        </div>
-      )}
-
-      {/* SEARCH MODE */}
-      {isSearchMode ? (
-        <div className="border-b border-neutral-200 dark:border-neutral-800 bg-neutral-100/50 dark:bg-neutral-900/30 shrink-0">
-          <div className="p-3 space-y-2">
-            {/* SEARCH BAR */}
-            <div className="relative">
-              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400 pointer-events-none" />
-
-              <input
-                ref={searchInputRef}
-                type="text"
-                placeholder="Search title, text, or #tag..."
-                value={searchQuery}
-                onChange={(e) =>
-                  onSearchChange(e.target.value)
-                }
-                className="w-full pl-9 pr-20 py-2.5 bg-white dark:bg-black border border-neutral-200 dark:border-neutral-800 rounded-xl text-sm text-neutral-900 dark:text-neutral-100 placeholder-neutral-400 focus:outline-none focus:border-neutral-400 dark:focus:border-neutral-600 transition-all"
-              />
-
-              {/* CLEAR SEARCH */}
-              {searchQuery && (
-                <button
-                  onClick={() => onSearchChange('')}
-                  className="absolute right-10 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-black dark:hover:text-white transition-colors"
-                  title="Clear Search"
-                >
-                  <span className="text-sm">×</span>
-                </button>
-              )}
-
-              {/* TAG TOGGLE */}
-              {allTags.length > 0 && (
-                <button
-                  onClick={() =>
-                    setIsTagPanelOpen(!isTagPanelOpen)
-                  }
-                  className={`absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-md transition-all ${
-                    isTagPanelOpen || selectedTag
-                      ? 'text-black dark:text-white bg-neutral-100 dark:bg-neutral-800'
-                      : 'text-neutral-400 hover:text-black dark:hover:text-white hover:bg-neutral-100 dark:hover:bg-neutral-800'
+                <ChevronDown
+                  className={`w-3.5 h-3.5 text-neutral-400 shrink-0 transition-transform ${
+                    isFolderDropdownOpen ? 'rotate-180' : ''
                   }`}
-                  title="Filter by tag"
-                >
-                  <ChevronDown
-                    className={`w-4 h-4 transition-transform duration-200 ${
-                      isTagPanelOpen
-                        ? 'rotate-180'
-                        : ''
+                />
+              </button>
+
+              {/* DROPDOWN MENU */}
+              {isFolderDropdownOpen && (
+                <div className="absolute top-full left-0 mt-1.5 w-52 bg-white dark:bg-neutral-900 rounded-xl shadow-xl border border-neutral-200 dark:border-neutral-800 py-1.5 z-50 text-xs">
+                  {/* NOTES */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveTab('notes');
+                      setIsFolderDropdownOpen(false);
+                    }}
+                    className={`w-full px-3 py-2 text-left flex items-center justify-between hover:bg-neutral-100 dark:hover:bg-neutral-800/80 transition-colors ${
+                      activeTab === 'notes'
+                        ? 'font-bold text-neutral-900 dark:text-neutral-100 bg-neutral-50 dark:bg-neutral-800/40'
+                        : 'text-neutral-600 dark:text-neutral-400'
                     }`}
-                  />
-                </button>
+                  >
+                    <div className="flex items-center space-x-2">
+                      <FileText className="w-4 h-4 text-neutral-500" />
+                      <span>Notes</span>
+                    </div>
+                    <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-neutral-100 dark:bg-neutral-800">
+                      {activeNotes.length}
+                    </span>
+                  </button>
+
+                  {/* TRASH */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveTab('trash');
+                      setIsFolderDropdownOpen(false);
+                    }}
+                    className={`w-full px-3 py-2 text-left flex items-center justify-between hover:bg-neutral-100 dark:hover:bg-neutral-800/80 transition-colors ${
+                      activeTab === 'trash'
+                        ? 'font-bold text-neutral-900 dark:text-neutral-100 bg-neutral-50 dark:bg-neutral-800/40'
+                        : 'text-neutral-600 dark:text-neutral-400'
+                    }`}
+                  >
+                    <div className="flex items-center space-x-2">
+                      <Trash2 className="w-4 h-4 text-neutral-500" />
+                      <span>Trash</span>
+                    </div>
+                    <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-neutral-100 dark:bg-neutral-800 text-red-600 dark:text-red-400">
+                      {trashedNotes.length}
+                    </span>
+                  </button>
+                </div>
               )}
             </div>
 
-            {/* SLIDE-OUT TAG PANEL */}
-            {allTags.length > 0 && (
-              <div
-                className={`grid transition-all duration-200 ease-out ${
-                  isTagPanelOpen
-                    ? 'grid-rows-[1fr] opacity-100'
-                    : 'grid-rows-[0fr] opacity-0'
-                }`}
-              >
-                <div className="overflow-hidden">
-                  <div className="pt-2">
-                    <div className="flex items-center justify-between mb-1.5">
-                      <span className="text-[10px] font-semibold uppercase tracking-wider text-neutral-500 dark:text-neutral-400">
-                        Filter by Tag
-                      </span>
-
-                      {selectedTag && (
-                        <button
-                          onClick={() => onSelectTag(null)}
-                          className="text-[10px] text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 transition-colors"
-                        >
-                          Clear
-                        </button>
-                      )}
-                    </div>
-
-                    <div className="flex flex-wrap gap-1 max-h-24 overflow-y-auto pr-1">
-                      {allTags.map((tag) => (
-                        <button
-                          key={tag}
-                          onClick={() =>
-                            onSelectTag(
-                              tag === selectedTag
-                                ? null
-                                : tag
-                            )
-                          }
-                          className={`px-2 py-0.5 rounded text-[11px] font-mono transition-colors ${
-                            selectedTag === tag
-                              ? 'bg-black text-white dark:bg-white dark:text-black font-semibold'
-                              : 'bg-white dark:bg-neutral-900 text-neutral-700 dark:text-neutral-300 border border-neutral-200 dark:border-neutral-800 hover:bg-neutral-200 dark:hover:bg-neutral-800'
-                          }`}
-                        >
-                          #{tag}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* ACTIVE TAG INDICATOR WHEN PANEL IS CLOSED */}
-            {!isTagPanelOpen && selectedTag && (
-              <div className="flex items-center">
-                <button
-                  onClick={() => onSelectTag(null)}
-                  className="text-[10px] font-mono px-2 py-0.5 bg-black text-white dark:bg-white dark:text-black rounded"
-                >
-                  #{selectedTag} ×
-                </button>
-              </div>
-            )}
-          </div>
-        </div>
-      ) : (
-        /* NORMAL VIEW: QUICK NOTE CREATOR */
-        <div className="p-3 space-y-2 shrink-0">
-          <form
-            onSubmit={handleQuickSubmit}
-            className="relative flex items-center"
-          >
-            <Plus className="w-4 h-4 absolute left-3 text-neutral-600 dark:text-neutral-300 pointer-events-none" />
-
-            <input
-              ref={quickInputRef}
-              type="text"
-              placeholder="Type to start a new note..."
-              value={quickText}
-              onChange={(e) =>
-                setQuickText(e.target.value)
-              }
-              className="w-full pl-9 pr-8 py-2.5 bg-neutral-100 dark:bg-neutral-900 border border-transparent rounded-lg text-sm text-neutral-900 dark:text-neutral-100 placeholder-neutral-500 dark:placeholder-neutral-500 focus:outline-none focus:bg-white dark:focus:bg-black focus:border-neutral-300 dark:focus:border-neutral-700 transition-all"
-            />
-
-            {quickText.trim() ? (
+            {/* ACTION BUTTONS: NEW NOTE & SETTINGS */}
+            <div className="flex items-center space-x-1 shrink-0">
               <button
-                type="submit"
-                title="Create Note"
-                className="absolute right-2 p-1 bg-black text-white dark:bg-white dark:text-black rounded hover:opacity-80 transition-opacity"
+                type="button"
+                onClick={() => onNewNote()}
+                className="flex items-center space-x-1 px-2.5 py-1.5 rounded-xl bg-neutral-900 dark:bg-neutral-100 text-white dark:text-black hover:bg-neutral-800 dark:hover:bg-neutral-200 transition-colors text-xs font-semibold shadow-xs"
+                title="Create New Note"
               >
-                <CornerDownLeft className="w-3 h-3" />
+                <Plus className="w-3.5 h-3.5" />
+                <span>New note</span>
               </button>
-            ) : (
-              <span className="absolute right-2.5 text-[10px] text-neutral-400 font-mono pointer-events-none">
-                ↵
-              </span>
-            )}
-          </form>
+
+              <button
+                type="button"
+                onClick={onOpenSettingsModal}
+                title="Open Settings"
+                className="p-1.5 text-neutral-500 hover:text-black dark:text-neutral-400 dark:hover:text-white rounded-lg hover:bg-neutral-200/60 dark:hover:bg-neutral-800/60 transition-colors"
+              >
+                <Settings className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+
+          {/* SECOND ROW: SEARCH BAR */}
+         {/* SECOND ROW: MINIMAL SEARCH */}
+<div className="relative w-full">
+  <Search className="w-3.5 h-3.5 absolute left-0 top-1/2 -translate-y-1/2 text-neutral-400 pointer-events-none" />
+
+  <input
+    ref={searchInputRef}
+    type="text"
+    placeholder="Search notes..."
+    value={searchQuery}
+    onChange={(e) => onSearchChange(e.target.value)}
+    className="
+      w-full
+      pl-5 pr-6 py-3
+      bg-transparent
+      border-0
+      border-b border-neutral-300 dark:border-neutral-700
+      rounded-none
+      text-xs
+      text-neutral-900 dark:text-neutral-100
+      placeholder-neutral-400
+      font-mono
+      focus:outline-none
+      focus:border-black dark:focus:border-white
+      transition-colors
+    "
+    title={`Search (${modKey}+F)`}
+/>
+
+{/* CLEAR SEARCH */}
+{searchQuery && (
+  <button
+    type="button"
+    onClick={() => onSearchChange('')}
+    className="absolute right-0 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-black dark:hover:text-white transition-colors"
+    title="Clear Search"
+  >
+    ×
+  </button>
+)}
+</div>
         </div>
       )}
 
-      {/* NOTES / TRASH LIST */}
+      {/* ==================================================
+          NOTES / TRASH LIST
+          ================================================== */}
+
       <div className="flex-1 overflow-y-auto px-2">
         {/* TRASH INFO */}
+
         {activeTab === 'trash' && (
           <div className="mb-2 p-2.5 bg-neutral-100 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg text-xs">
             <div className="flex items-center justify-between font-semibold text-neutral-800 dark:text-neutral-200 mb-1">
@@ -692,6 +552,7 @@ const handlePressEnd = useCallback(() => {
         )}
 
         {/* EMPTY STATE */}
+
         {sortedNotes.length === 0 ? (
           <div className="py-12 text-center px-4">
             {activeTab === 'trash' ? (
@@ -707,7 +568,7 @@ const handlePressEnd = useCallback(() => {
                 <FileText className="w-8 h-8 text-neutral-300 dark:text-neutral-700 mx-auto mb-2" />
 
                 <p className="text-xs font-medium text-neutral-500 dark:text-neutral-400">
-                  {isSearchMode
+                  {searchQuery
                     ? 'No matching notes found'
                     : 'No notes yet'}
                 </p>
@@ -715,23 +576,23 @@ const handlePressEnd = useCallback(() => {
             )}
           </div>
         ) : (
-          /* NOTE LIST */
+          /* ==================================================
+             NOTE LIST
+             ================================================== */
+
           sortedNotes.map((note) => {
-            const isActive = note.id === activeNoteId;
-            const isSelected = selectedNoteIds.includes(
-              note.id
-            );
+            const isActive =
+              note.id === activeNoteId;
+
+            const isSelected =
+              selectedNoteIds.includes(note.id);
 
             const noteTitle = note.title
               ? note.title.trim()
               : '';
 
-            const cleanSnippet = getCleanSnippet(
-              note.content
-            );
-
             const formattedDate = new Date(
-              note.createdAt || note.updatedAt
+              note.updatedAt || note.createdAt
             ).toLocaleDateString(undefined, {
               month: 'short',
               day: 'numeric',
@@ -740,35 +601,41 @@ const handlePressEnd = useCallback(() => {
             return (
               <div
                 key={note.id}
-                onMouseDown={(e) => handlePressStart(note.id, e)}
-onMouseMove={handlePressMove}
-onMouseUp={handlePressEnd}
-onMouseLeave={handlePressEnd}
-onTouchStart={(e) => handlePressStart(note.id, e)}
-onTouchMove={handlePressMove}
-onTouchEnd={handlePressEnd}
-
+                onMouseDown={(e) =>
+                  handlePressStart(note.id, e)
+                }
+                onMouseMove={handlePressMove}
+                onMouseUp={handlePressEnd}
+                onMouseLeave={handlePressEnd}
+                onTouchStart={(e) =>
+                  handlePressStart(note.id, e)
+                }
+                onTouchMove={handlePressMove}
+                onTouchEnd={handlePressEnd}
                 onContextMenu={(e) =>
                   handleContextMenu(note.id, e)
                 }
-                onClick={() => handleNoteClick(note.id)}
-                className={`group relative px-2.5 py-4 cursor-pointer touch-pan-y transition-all flex items-start space-x-2.5 ${
+                onClick={() =>
+                  handleNoteClick(note.id)
+                }
+                className={`group relative py-4 pr-2.5 cursor-pointer transition-all flex items-start space-x-2.5 ${
                   isSelected
-                    ? 'bg-blue-50/80 dark:bg-blue-950/40 border-blue-500 dark:border-blue-400 text-blue-950 dark:text-blue-100'
+                    ? 'pl-2.5 bg-black text-white dark:bg-white dark:text-black'
                     : isActive
-                    ? 'border-b-4 border-b-black dark:border-b-white text-black dark:text-white'
-                    : 'text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100/60 dark:hover:bg-neutral-900/60'
+                    ? 'pl-1.5 border-l-4 border-l-black dark:border-l-white text-black dark:text-white'
+                    : 'pl-2.5 text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100/60 dark:hover:bg-neutral-900/60'
                 }`}
               >
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-center justify-between gap-1">
-                    {/* TITLE */}
+                  {/* TITLE / UNTITLED PREVIEW */}
+
+                  <div className="flex items-start justify-between gap-1">
                     {noteTitle ? (
-                      <h3 className="note-title font-bold truncate flex-1 min-w-0">
+                      <h3 className="font-bold truncate flex-1 min-w-0">
                         {noteTitle}
                       </h3>
                     ) : (
-                      <div className="mt-1 note-preview">
+                      <div className="mt-1 text-sm flex-1 min-w-0">
                         <NotePreview
                           content={note.content}
                         />
@@ -776,13 +643,15 @@ onTouchEnd={handlePressEnd}
                     )}
 
                     {/* PIN */}
+
                     {note.pinned &&
                       activeTab === 'notes' && (
-                        <Pin className="w-3 h-3 text-neutral-500 dark:text-neutral-400 fill-current shrink-0 ml-1" />
+                        <Pin className="w-3 h-3 text-current fill-current shrink-0 ml-1" />
                       )}
                   </div>
 
                   {/* PREVIEW FOR TITLED NOTES */}
+
                   {noteTitle && (
                     <div className="mt-1 text-sm">
                       <NotePreview
@@ -792,34 +661,37 @@ onTouchEnd={handlePressEnd}
                   )}
 
                   {/* FOOTER */}
-                  {activeTab === 'notes' &&
-                    (showDates ||
-                      (isSearchMode &&
-                        note.tags.length > 0)) && (
-                      <div className="flex items-center justify-between mt-2 pt-1.5 border-t border-neutral-100 dark:border-neutral-800/80">
-                        {showDates ? (
-                          <span className="text-[10px] text-neutral-400 dark:text-neutral-500 font-mono">
-                            {formattedDate}
-                          </span>
-                        ) : (
-                          <span />
-                        )}
 
-                        {isSearchMode &&
-                          note.tags.length > 0 && (
-                            <div className="flex items-center space-x-1 overflow-hidden max-w-[130px]">
-                              {note.tags
-                                .slice(0, 2)
-                                .map((t) => (
-                                  <span
-                                    key={t}
-                                    className="text-[9px] font-mono px-1.5 py-0.2 bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400 rounded truncate"
-                                  >
-                                    #{t}
-                                  </span>
-                                ))}
-                            </div>
-                          )}
+                  {activeTab === 'notes' && (
+                    <div className="flex items-center justify-between mt-2 pt-1.5 border-t border-neutral-100 dark:border-neutral-800/80">
+                      <span className="text-xs text-neutral-400 dark:text-neutral-500 font-mono">
+                        {formattedDate}
+                      </span>
+
+                        {note.tags.length > 0 && (
+                          <div className="flex items-center space-x-1 overflow-hidden max-w-[160px]">
+                            {note.tags
+                              .slice(0, 3)
+                              .map((t) => (
+                                <button
+                                  key={t}
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    onSearchChange(t);
+                                  }}
+                                  className={`text-xs font-mono px-1.5 py-0.5 rounded-md truncate border transition-colors ${
+                                    isSelected
+                                      ? 'bg-white/10 text-current border-white/20 hover:bg-white/20 dark:bg-black/10 dark:border-black/20'
+                                      : 'bg-neutral-100 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300 border-neutral-200/60 dark:border-neutral-700/60 hover:bg-neutral-200 dark:hover:bg-neutral-700'
+                                  }`}
+                                  title={`Search for #${t}`}
+                                >
+                                  {t}
+                                </button>
+                              ))}
+                          </div>
+                        )}
                       </div>
                     )}
                 </div>

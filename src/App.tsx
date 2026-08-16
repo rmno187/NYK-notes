@@ -10,6 +10,8 @@ import {
   deleteNoteFromDirectory,
 } from './lib/storage';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
+import { convertHtmlToMarkdown } from './lib/markdown';
+import { isMac, modSymbol } from './lib/platform';
 import { Sidebar } from './components/Sidebar';
 import { EditorPane } from './components/EditorPane';
 import { CommandPalette } from './components/CommandPalette';
@@ -104,9 +106,6 @@ export default function App() {
   const [editorMode, setEditorMode] = useState<EditorMode>('wysiwyg');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
-  const [showDates, setShowDates] = useState<boolean>(
-    () => localStorage.getItem('notes_show_dates') === 'true'
-  );
   
   const [isSearchMode, setIsSearchMode] = useState(false);
   const [isSavedIndicator, setIsSavedIndicator] = useState(false);
@@ -145,7 +144,11 @@ export default function App() {
             if (note.deletedAt && now - note.deletedAt > THIRTY_DAYS_MS) {
               await deleteIndexedDBNote(note.id);
             } else {
-              validNotes.push(note);
+              const cleanNote =
+                note.content.trim().startsWith('<p>') && note.content.includes('</p>')
+                  ? { ...note, content: convertHtmlToMarkdown(note.content) }
+                  : note;
+              validNotes.push(cleanNote);
             }
           }
 
@@ -697,7 +700,6 @@ export default function App() {
           onSearchChange={setSearchQuery}
           isSearchMode={isSearchMode}
           onToggleSearchMode={() => setIsSearchMode((prev) => !prev)}
-          showDates={showDates}
           onOpenSettingsModal={() => setIsSettingsModalOpen(true)}
           className={mobileView === 'editor' ? 'hidden md:flex w-full md:w-80' : 'flex w-full md:w-80'}
         />
@@ -725,7 +727,7 @@ export default function App() {
             <div className="flex-1 flex flex-col items-center justify-center p-8 text-center bg-white dark:bg-black">
               <h2 className="text-lg font-bold text-neutral-800 dark:text-neutral-200">No Note Selected</h2>
               <p className="text-xs text-neutral-400 mt-1 max-w-sm">
-                Select a note from the sidebar or click "New Note" (⌘N) to start writing.
+                Select a note from the sidebar or click "New Note" ({modSymbol}{isMac ? '⇧' : '+Shift+'}N) to start writing.
               </p>
               <button
                 onClick={handleNewNote}
@@ -757,14 +759,6 @@ export default function App() {
         onClose={() => setIsSettingsModalOpen(false)}
         theme={theme}
         onToggleTheme={handleToggleTheme}
-        showDates={showDates}
-        onToggleShowDates={() => {
-          setShowDates((prev) => {
-            const next = !prev;
-            localStorage.setItem('notes_show_dates', String(next));
-            return next;
-          });
-        }}
         storageMode={storageMode}
         directoryName={directoryName}
         onOpenDirectoryModal={() => setIsDirectoryModalOpen(true)}

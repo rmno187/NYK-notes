@@ -11,6 +11,7 @@ import {
   FileText,
 } from 'lucide-react';
 import { Note } from '../types';
+import { isMac, modSymbol, altSymbol } from '../lib/platform';
 
 interface CommandPaletteProps {
   isOpen: boolean;
@@ -76,7 +77,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
       id: 'act-new',
       type: 'action',
       title: 'Create New Note',
-      shortcut: '⌘N',
+      shortcut: `${altSymbol}${isMac ? '' : '+'}N`,
       icon: <Plus className="w-4 h-4" />,
       handler: () => {
         onNewNote();
@@ -87,7 +88,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
       id: 'act-view',
       type: 'action',
       title: 'Toggle Editor View (WYSIWYG / Markdown)',
-      shortcut: '⌘P',
+      shortcut: `${modSymbol}${isMac ? '' : '+'}E`,
       icon: <Eye className="w-4 h-4" />,
       handler: () => {
         onToggleViewMode();
@@ -98,7 +99,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
       id: 'act-theme',
       type: 'action',
       title: 'Toggle Dark / Light Mode',
-      shortcut: '⌘⇧D',
+      shortcut: `${modSymbol}${isMac ? '⇧' : '+Shift+'}D`,
       icon: <Sun className="w-4 h-4" />,
       handler: () => {
         onToggleTheme();
@@ -119,7 +120,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
       id: 'act-backup',
       type: 'action',
       title: 'Encrypted Backup Export / Import',
-      shortcut: '⌘⇧B',
+      shortcut: `${modSymbol}${isMac ? '⇧' : '+Shift+'}B`,
       icon: <Key className="w-4 h-4" />,
       handler: () => {
         onOpenBackupModal();
@@ -130,7 +131,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
       id: 'act-help',
       type: 'action',
       title: 'Keyboard Shortcuts Cheat Sheet',
-      shortcut: '?',
+      shortcut: '⇧?',
       icon: <HelpCircle className="w-4 h-4" />,
       handler: () => {
         onOpenShortcutsModal();

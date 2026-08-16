@@ -17,67 +17,59 @@ export function useKeyboardShortcuts(handlers: ShortcutHandlers) {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const isCmdOrCtrl = e.metaKey || e.ctrlKey;
+      const keyLower = e.key.toLowerCase();
+      const editing = isEditingText(e);
 
-      // Cmd/Ctrl + K -> Command Palette
-      if (isCmdOrCtrl && e.key.toLowerCase() === 'k') {
-        e.preventDefault();
-        handlers.onOpenCommandPalette?.();
-        return;
-      }
-
-      // Cmd/Ctrl + N -> New Note
-      if (isCmdOrCtrl && e.key.toLowerCase() === 'n') {
+      // Alt/Option + N -> New Note (avoids browser Ctrl/Cmd+N window collision)
+      if (e.altKey && keyLower === 'n') {
         e.preventDefault();
         handlers.onNewNote?.();
         return;
       }
 
-      // Cmd/Ctrl + Shift + D -> Toggle Dark Mode
-      if (isCmdOrCtrl && e.shiftKey && e.key.toLowerCase() === 'd') {
+      // Ctrl/Cmd + K -> Command Palette
+      if (isCmdOrCtrl && keyLower === 'k') {
         e.preventDefault();
-        handlers.onToggleDarkMode?.();
+        handlers.onOpenCommandPalette?.();
         return;
       }
 
-      // Cmd/Ctrl + P or Cmd/Ctrl + E -> Toggle View Mode (Split/Edit/Preview)
-      if (isCmdOrCtrl && (e.key.toLowerCase() === 'p' || e.key.toLowerCase() === 'e')) {
-        // Only prevent default if not inside input or if explicit view shortcut
-        if (!isEditingText(e) || isCmdOrCtrl) {
-          e.preventDefault();
-          handlers.onToggleViewMode?.();
-          return;
-        }
-      }
-
-      // Cmd/Ctrl + S -> Save note
-      if (isCmdOrCtrl && e.key.toLowerCase() === 's') {
-        e.preventDefault();
-        handlers.onSaveNote?.();
-        return;
-      }
-
-      // Cmd/Ctrl + F -> Focus search
-      if (isCmdOrCtrl && e.key.toLowerCase() === 'f' && !e.shiftKey) {
+      // Ctrl/Cmd + F -> Search
+      if (isCmdOrCtrl && keyLower === 'f') {
         e.preventDefault();
         handlers.onFocusSearch?.();
         return;
       }
 
-      // Cmd/Ctrl + Shift + B -> Backup Modal
-      if (isCmdOrCtrl && e.shiftKey && e.key.toLowerCase() === 'b') {
+      // Ctrl/Cmd + Shift + D -> Dark/Light
+      if (isCmdOrCtrl && e.shiftKey && keyLower === 'd') {
+        e.preventDefault();
+        handlers.onToggleDarkMode?.();
+        return;
+      }
+
+      // Ctrl/Cmd + Shift + B -> Encrypted Backup
+      if (isCmdOrCtrl && e.shiftKey && keyLower === 'b') {
         e.preventDefault();
         handlers.onOpenBackupModal?.();
         return;
       }
 
-      // ? or Cmd+/ -> Keyboard Shortcuts Cheat Sheet
-      if ((e.key === '?' && !isEditingText(e)) || (isCmdOrCtrl && e.key === '/')) {
+      // Ctrl/Cmd + E -> Editor/Markdown
+      if (isCmdOrCtrl && keyLower === 'e') {
+        e.preventDefault();
+        handlers.onToggleViewMode?.();
+        return;
+      }
+
+      // Shift + ? -> Shortcuts (only when not editing text)
+      if (!editing && e.shiftKey && (e.key === '?' || e.key === '/')) {
         e.preventDefault();
         handlers.onOpenShortcutsModal?.();
         return;
       }
 
-      // Escape -> Close modals
+      // Esc -> Close/Clear
       if (e.key === 'Escape') {
         handlers.onCloseModals?.();
         return;
@@ -92,6 +84,15 @@ export function useKeyboardShortcuts(handlers: ShortcutHandlers) {
 function isEditingText(e: KeyboardEvent): boolean {
   const target = e.target as HTMLElement;
   if (!target) return false;
-  const tagName = target.tagName.toLowerCase();
-  return tagName === 'input' || tagName === 'textarea' || target.isContentEditable;
+  const tagName = target.tagName ? target.tagName.toLowerCase() : '';
+  if (tagName === 'input' || tagName === 'textarea' || tagName === 'select') {
+    return true;
+  }
+  if (target.isContentEditable) {
+    return true;
+  }
+  if (target.closest && target.closest('[contenteditable="true"]')) {
+    return true;
+  }
+  return false;
 }

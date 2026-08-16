@@ -28,6 +28,7 @@ import {
   Copy,
 } from 'lucide-react';
 import { Note, EditorMode } from '../types';
+import { modSymbol } from '../lib/platform';
 import { renderMarkdownToHtml, convertHtmlToMarkdown, applyFormatting } from '../lib/markdown';
 
 interface EditorPaneProps {
@@ -77,21 +78,57 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const wysiwygRef = useRef<HTMLDivElement>(null);
-  const [newTagInput, setNewTagInput] = useState('');
-  const [showTagInput, setShowTagInput] = useState(false);
+  const [tagInput, setTagInput] = useState('');
+  const [isTagDropdownOpen, setIsTagDropdownOpen] = useState(false);
+  const tagDropdownRef = useRef<HTMLDivElement>(null);
   const [isSlideoutOpen, setIsSlideoutOpen] = useState(false);
 
-  // Close slideout panel when switching notes
+  // Close slideout panel and tag dropdown when switching notes
   useEffect(() => {
     setIsSlideoutOpen(false);
+    setTagInput('');
+    setIsTagDropdownOpen(false);
   }, [note.id]);
+
+  // Close tag dropdown on outside click
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (tagDropdownRef.current && !tagDropdownRef.current.contains(e.target as Node)) {
+        setIsTagDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const cleanTypedTag = tagInput.trim().replace(/^#/, '').toLowerCase();
+  const availableExistingTags = allTags.filter((t) => {
+    if (note.tags.includes(t)) return false;
+    if (!cleanTypedTag) return true;
+    return t.toLowerCase().includes(cleanTypedTag);
+  });
+
+  const handleAddTag = (tagToAdd: string) => {
+    const clean = tagToAdd.trim().replace(/^#/, '').toLowerCase();
+    if (clean && !note.tags.includes(clean)) {
+      onAddTag(clean);
+    }
+    setTagInput('');
+    setIsTagDropdownOpen(false);
+  };
+
+  const prevNoteIdForHtmlRef = useRef<string>(note.id);
 
   // Sync note content to WYSIWYG innerHTML when note changes or mode switches
   useEffect(() => {
     if (mode === 'wysiwyg' && wysiwygRef.current) {
+      const isDifferentNote = prevNoteIdForHtmlRef.current !== note.id;
+      prevNoteIdForHtmlRef.current = note.id;
+
       const html = renderMarkdownToHtml(note.content);
-      // Avoid overwriting if user is actively typing in wysiwyg
-      if (document.activeElement !== wysiwygRef.current) {
+      // Avoid overwriting if user is actively typing in wysiwyg on the SAME note,
+      // but ALWAYS force update innerHTML when switching to a different note.
+      if (isDifferentNote || document.activeElement !== wysiwygRef.current) {
         wysiwygRef.current.innerHTML = html || '<p><br></p>';
       }
     }
@@ -103,7 +140,8 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
       const sel = window.getSelection();
       if (sel) {
         const range = document.createRange();
-        range.selectNodeContents(wysiwygRef.current);
+        const targetNode = wysiwygRef.current.firstElementChild || wysiwygRef.current;
+        range.selectNodeContents(targetNode);
         range.collapse(false);
         sel.removeAllRanges();
         sel.addRange(range);
@@ -115,10 +153,20 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
     }
   }, [mode]);
 
-  // Do not auto-focus on note switch so existing notes don't immediately open keyboard
+  // Auto-focus paragraph text when a new note is opened/created
+  const prevNoteIdRef = useRef<string>(note.id);
   useEffect(() => {
-    // Keep content updated when switching notes
-  }, [note.id]);
+    const isBrandNewNote = Date.now() - note.createdAt < 3000 || (!note.title && !note.content);
+    if (prevNoteIdRef.current !== note.id || isBrandNewNote) {
+      prevNoteIdRef.current = note.id;
+      if (isBrandNewNote) {
+        const timer = setTimeout(() => {
+          focusContent();
+        }, 50);
+        return () => clearTimeout(timer);
+      }
+    }
+  }, [note.id, note.createdAt, note.title, note.content, focusContent]);
 
   // Handle direct editing in WYSIWYG contentEditable div
   const handleWysiwygInput = useCallback(() => {
@@ -133,13 +181,31 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
     (e: React.MouseEvent<HTMLDivElement>) => {
       const target = e.target as HTMLElement;
       if (target.tagName === 'INPUT' && (target as HTMLInputElement).type === 'checkbox') {
-        setTimeout(() => {
-          if (wysiwygRef.current) {
-            const html = wysiwygRef.current.innerHTML;
-            const markdown = convertHtmlToMarkdown(html);
-            onChangeContent(markdown);
+        const cb = target as HTMLInputElement;
+        const isCheckedAttr = cb.hasAttribute('checked');
+
+        // Ensure checked state and attribute are in sync
+        if (cb.checked !== isCheckedAttr) {
+          if (cb.checked) {
+            cb.setAttribute('checked', 'checked');
+          } else {
+            cb.removeAttribute('checked');
           }
-        }, 10);
+        } else {
+          // If browser contenteditable suppressed automatic toggle, toggle manually
+          cb.checked = !cb.checked;
+          if (cb.checked) {
+            cb.setAttribute('checked', 'checked');
+          } else {
+            cb.removeAttribute('checked');
+          }
+        }
+
+        if (wysiwygRef.current) {
+          const html = wysiwygRef.current.innerHTML;
+          const markdown = convertHtmlToMarkdown(html);
+          onChangeContent(markdown);
+        }
       }
     },
     [onChangeContent]
@@ -406,9 +472,204 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
     };
   }, [mode, checkActiveFormats]);
 
+  // Unified WYSIWYG block formatting helper
+  const applyWysiwygBlockFormat = (targetType: string) => {
+    if (!wysiwygRef.current) return;
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0) return;
+    const range = sel.getRangeAt(0);
+
+    // Candidate block elements inside wysiwygRef.current
+    const allNodes = Array.from(
+      wysiwygRef.current.querySelectorAll('li, p, h1, h2, h3, h4, h5, h6, blockquote, pre, div')
+    ) as HTMLElement[];
+
+    // Filter to nodes that intersect range or contain selection endpoints
+    let selectedNodes = allNodes.filter((node) => {
+      if (node.tagName === 'UL' || node.tagName === 'OL') return false;
+      if (node.tagName === 'DIV' && node.querySelector('p, li, h1, h2, h3, blockquote, pre')) return false;
+
+      try {
+        return range.intersectsNode(node);
+      } catch {
+        return false;
+      }
+    });
+
+    // Fallback if range.intersectsNode didn't catch anything (e.g. collapsed cursor in empty line)
+    if (selectedNodes.length === 0 && sel.anchorNode) {
+      let curr: Node | null = sel.anchorNode.nodeType === Node.TEXT_NODE ? sel.anchorNode.parentNode : sel.anchorNode;
+      const block = (curr as HTMLElement)?.closest('li, p, h1, h2, h3, h4, h5, h6, blockquote, pre, div');
+      if (block) {
+        selectedNodes = [block as HTMLElement];
+      }
+    }
+
+    if (selectedNodes.length === 0) return;
+
+    // Helper to determine format of a node
+    const getNodeFormat = (node: HTMLElement) => {
+      if (node.tagName === 'LI') {
+        if (node.classList.contains('task-list-item') || node.querySelector('input[type="checkbox"]')) {
+          return 'task';
+        }
+        if (node.parentElement?.tagName === 'OL') {
+          return 'number';
+        }
+        return 'bullet';
+      }
+      if (node.tagName === 'H1') return 'heading';
+      if (node.tagName === 'H2') return 'h2';
+      if (node.tagName === 'BLOCKQUOTE') return 'quote';
+      if (node.tagName === 'PRE') return 'code';
+      return 'paragraph';
+    };
+
+    // Check if toggle off (all selected nodes already match targetType)
+    const allMatch = selectedNodes.every((node) => getNodeFormat(node) === targetType);
+    const finalFormat = allMatch ? 'paragraph' : targetType;
+
+    // Extract cleaned content
+    const items = selectedNodes.map((node) => {
+      const clone = node.cloneNode(true) as HTMLElement;
+      clone.querySelectorAll('input[type="checkbox"]').forEach((cb) => cb.remove());
+      let content = clone.innerHTML.trim();
+      // Clean off any raw prefix like [ ], [/], [x], [X], •, -, * from HTML string
+      content = content.replace(/^(\s*\[[\s\S]?\]|\s*[-*+•])\s*/i, '');
+      if (!content) content = '<br>';
+      return { node, content };
+    });
+
+    // Build new DOM element(s) based on finalFormat
+    let newElements: HTMLElement[] = [];
+
+    if (finalFormat === 'task') {
+      const ul = document.createElement('ul');
+      ul.className = 'contains-task-list';
+      items.forEach(({ content }) => {
+        const li = document.createElement('li');
+        li.className = 'task-list-item';
+        li.innerHTML = `<input type="checkbox" /> ${content}`;
+        ul.appendChild(li);
+      });
+      newElements = [ul];
+    } else if (finalFormat === 'bullet') {
+      const ul = document.createElement('ul');
+      items.forEach(({ content }) => {
+        const li = document.createElement('li');
+        li.innerHTML = content;
+        ul.appendChild(li);
+      });
+      newElements = [ul];
+    } else if (finalFormat === 'number') {
+      const ol = document.createElement('ol');
+      items.forEach(({ content }) => {
+        const li = document.createElement('li');
+        li.innerHTML = content;
+        ol.appendChild(li);
+      });
+      newElements = [ol];
+    } else if (finalFormat === 'heading') {
+      newElements = items.map(({ content }) => {
+        const h1 = document.createElement('h1');
+        h1.innerHTML = content;
+        return h1;
+      });
+    } else if (finalFormat === 'h2') {
+      newElements = items.map(({ content }) => {
+        const h2 = document.createElement('h2');
+        h2.innerHTML = content;
+        return h2;
+      });
+    } else if (finalFormat === 'quote') {
+      newElements = items.map(({ content }) => {
+        const bq = document.createElement('blockquote');
+        bq.innerHTML = content;
+        return bq;
+      });
+    } else if (finalFormat === 'code') {
+      const pre = document.createElement('pre');
+      pre.innerHTML = items.map((i) => i.content).join('<br>');
+      newElements = [pre];
+    } else {
+      // paragraph
+      newElements = items.map(({ content }) => {
+        const p = document.createElement('p');
+        p.innerHTML = content;
+        return p;
+      });
+    }
+
+    // Insert newElements at exact position and cleanup selectedNodes
+    const firstNode = selectedNodes[0];
+    const firstParentList = firstNode.tagName === 'LI' ? firstNode.parentElement : null;
+
+    if (firstParentList && (firstParentList.tagName === 'UL' || firstParentList.tagName === 'OL')) {
+      const allLis = Array.from(firstParentList.children) as HTMLElement[];
+      const selectedLisInFirstList = selectedNodes.filter((n) => n.parentElement === firstParentList);
+
+      const firstSelIdx = allLis.indexOf(selectedLisInFirstList[0]);
+      const lastSelIdx = allLis.indexOf(selectedLisInFirstList[selectedLisInFirstList.length - 1]);
+
+      const unselectedBefore = allLis.slice(0, firstSelIdx);
+      const unselectedAfter = allLis.slice(lastSelIdx + 1);
+
+      if (unselectedAfter.length > 0) {
+        const trailingList = document.createElement(firstParentList.tagName) as HTMLElement;
+        trailingList.className = firstParentList.className;
+        unselectedAfter.forEach((li) => trailingList.appendChild(li));
+        if (firstParentList.nextSibling) {
+          firstParentList.parentNode?.insertBefore(trailingList, firstParentList.nextSibling);
+        } else {
+          firstParentList.parentNode?.appendChild(trailingList);
+        }
+      }
+
+      if (unselectedBefore.length > 0) {
+        // Insert newElements after firstParentList
+        newElements.slice().reverse().forEach((el) => {
+          if (firstParentList.nextSibling) {
+            firstParentList.parentNode?.insertBefore(el, firstParentList.nextSibling);
+          } else {
+            firstParentList.parentNode?.appendChild(el);
+          }
+        });
+      } else {
+        // Insert newElements before firstParentList
+        newElements.forEach((el) => {
+          firstParentList.parentNode?.insertBefore(el, firstParentList);
+        });
+      }
+    } else {
+      // Top level block element
+      const topLevelAnchor = firstNode;
+      newElements.forEach((el) => {
+        topLevelAnchor.parentNode?.insertBefore(el, topLevelAnchor);
+      });
+    }
+
+    // Now remove all selectedNodes and cleanup empty parent lists
+    const listsToCheck = new Set<HTMLElement>();
+    selectedNodes.forEach((node) => {
+      if (node.tagName === 'LI' && node.parentElement) {
+        listsToCheck.add(node.parentElement as HTMLElement);
+      }
+      node.remove();
+    });
+
+    listsToCheck.forEach((list) => {
+      if (list.children.length === 0) {
+        list.remove();
+      }
+    });
+
+    handleWysiwygInput();
+    checkActiveFormats();
+  };
+
   // Formatting actions
   const handleFormat = (
-    type: 'bold' | 'italic' | 'heading' | 'h2' | 'code' | 'quote' | 'link' | 'bullet' | 'number' | 'task' | 'table' | 'hr'
+    type: 'bold' | 'italic' | 'heading' | 'h2' | 'code' | 'quote' | 'link' | 'bullet' | 'number' | 'task' | 'paragraph' | 'table' | 'hr'
   ) => {
     if (mode === 'wysiwyg' && wysiwygRef.current) {
       wysiwygRef.current.focus();
@@ -420,115 +681,16 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
         case 'italic':
           document.execCommand('italic', false);
           break;
+        case 'paragraph':
         case 'heading':
-          if (activeFormats.heading) {
-            document.execCommand('formatBlock', false, '<p>');
-          } else {
-            document.execCommand('formatBlock', false, '<h1>');
-          }
-          break;
         case 'h2':
-          if (activeFormats.h2) {
-            document.execCommand('formatBlock', false, '<p>');
-          } else {
-            document.execCommand('formatBlock', false, '<h2>');
-          }
-          break;
         case 'quote':
-          if (activeFormats.quote) {
-            document.execCommand('formatBlock', false, '<p>');
-          } else {
-            document.execCommand('formatBlock', false, '<blockquote>');
-          }
-          break;
-        case 'bullet':
-          document.execCommand('insertUnorderedList', false);
-          break;
-        case 'number':
-          document.execCommand('insertOrderedList', false);
-          break;
         case 'code':
-          if (activeFormats.code) {
-            document.execCommand('formatBlock', false, '<p>');
-          } else {
-            document.execCommand('formatBlock', false, '<pre>');
-          }
+        case 'bullet':
+        case 'number':
+        case 'task':
+          applyWysiwygBlockFormat(type);
           break;
-        case 'task': {
-          if (activeFormats.task) {
-            const sel = window.getSelection();
-            if (sel && sel.anchorNode) {
-              let node: Node | null = sel.anchorNode;
-              if (node.nodeType === Node.TEXT_NODE) node = node.parentNode;
-              const taskList = (node as HTMLElement)?.closest('li');
-              if (taskList) {
-                const clone = taskList.cloneNode(true) as HTMLElement;
-                clone.querySelectorAll('input[type="checkbox"]').forEach((cb) => cb.remove());
-                const text = clone.textContent || '';
-                const p = document.createElement('p');
-                p.textContent = text;
-                if (!p.textContent) p.innerHTML = '<br>';
-                const parentList = taskList.closest('ul');
-                taskList.parentNode?.replaceChild(p, taskList);
-                if (parentList && parentList.children.length === 0) {
-                  parentList.remove();
-                }
-              }
-            }
-          } else {
-            const sel = window.getSelection();
-            if (sel && sel.rangeCount > 0) {
-              const range = sel.getRangeAt(0);
-              const fragment = range.cloneContents();
-              const temp = document.createElement('div');
-              temp.appendChild(fragment);
-
-              const blockElems = temp.querySelectorAll('p, div, li, h1, h2, h3, blockquote, pre');
-              let lines: string[] = [];
-
-              if (blockElems.length > 0) {
-                blockElems.forEach((b) => {
-                  const clone = b.cloneNode(true) as HTMLElement;
-                  clone.querySelectorAll('input[type="checkbox"]').forEach((cb) => cb.remove());
-                  const t = clone.textContent?.trim();
-                  if (t) lines.push(t);
-                });
-              }
-
-              if (lines.length === 0) {
-                const html = temp.innerHTML;
-                lines = html
-                  .split(/<br\s*\/?>|\r?\n/i)
-                  .map((line) => {
-                    const dummy = document.createElement('div');
-                    dummy.innerHTML = line;
-                    return dummy.textContent?.trim() || '';
-                  })
-                  .filter((l) => l.length > 0);
-              }
-
-              if (lines.length === 0) {
-                const fullText = temp.textContent?.trim();
-                if (fullText) lines = [fullText];
-              }
-
-              if (lines.length > 0) {
-                const itemsHtml = lines
-                  .map((line) => `<li class="task-list-item"><input type="checkbox" /> ${line}</li>`)
-                  .join('');
-                const htmlToInsert = `<ul class="contains-task-list">${itemsHtml}</ul><p><br></p>`;
-                document.execCommand('insertHTML', false, htmlToInsert);
-              } else {
-                document.execCommand(
-                  'insertHTML',
-                  false,
-                  '<ul class="contains-task-list"><li class="task-list-item"><input type="checkbox" /> Task item</li></ul><p><br></p>'
-                );
-              }
-            }
-          }
-          break;
-        }
         case 'link': {
           if (mode === 'wysiwyg') {
             if (activeFormats.link) {
@@ -635,6 +797,58 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
   // Handle key presses inside WYSIWYG editor (Enter clearing styles, Backspace breaking away styles)
   const handleWysiwygKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
     if (!wysiwygRef.current) return;
+
+    if (e.key === 'Tab') {
+      e.preventDefault();
+      const info = getCaretBlockAndOffset(wysiwygRef.current);
+
+      if (info && info.blockNode) {
+        const { blockNode } = info;
+        const tag = blockNode.tagName.toUpperCase();
+
+        // If inside a list item (bullet, number, or task), indent/outdent list level
+        if (tag === 'LI') {
+          if (e.shiftKey) {
+            document.execCommand('outdent', false);
+          } else {
+            document.execCommand('indent', false);
+          }
+          handleWysiwygInput();
+          checkActiveFormats();
+          return;
+        }
+      }
+
+      // General paragraph/block indentation
+      if (e.shiftKey) {
+        // Shift + Tab: unindent leading spaces if present
+        if (info && info.blockNode) {
+          const text = info.blockNode.textContent || '';
+          if (text.startsWith('\u00A0\u00A0') || text.startsWith('  ')) {
+            info.blockNode.textContent = text.replace(/^(\u00A0\u00A0|  |\t|\u00A0)/, '');
+            handleWysiwygInput();
+            checkActiveFormats();
+            return;
+          }
+        }
+      } else {
+        // Tab: insert 2 non-breaking spaces at cursor
+        const sel = window.getSelection();
+        if (sel && sel.rangeCount > 0) {
+          const range = sel.getRangeAt(0);
+          range.deleteContents();
+          const spaceNode = document.createTextNode('\u00A0\u00A0');
+          range.insertNode(spaceNode);
+          range.setStartAfter(spaceNode);
+          range.setEndAfter(spaceNode);
+          sel.removeAllRanges();
+          sel.addRange(range);
+          handleWysiwygInput();
+          checkActiveFormats();
+          return;
+        }
+      }
+    }
 
     if (e.key === 'Enter') {
       const info = getCaretBlockAndOffset(wysiwygRef.current);
@@ -860,29 +1074,57 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
       const end = textarea.selectionEnd;
       const val = note.content;
 
-      const updated = val.substring(0, start) + '  ' + val.substring(end);
-      onChangeContent(updated);
+      if (start !== end) {
+        // Multi-line selection or text block selection
+        const lineStart = val.lastIndexOf('\n', start - 1) + 1;
+        const lineEnd = val.indexOf('\n', end);
+        const actualEnd = lineEnd === -1 ? val.length : lineEnd;
+        const selectedText = val.substring(lineStart, actualEnd);
+        const lines = selectedText.split('\n');
 
-      setTimeout(() => {
-        textarea.selectionStart = textarea.selectionEnd = start + 2;
-      }, 0);
-    }
-  };
+        let modifiedLines: string[];
+        if (e.shiftKey) {
+          modifiedLines = lines.map((line) => line.replace(/^(  |\t|\u00A0{2})/, ''));
+        } else {
+          modifiedLines = lines.map((line) => '  ' + line);
+        }
 
-  const handleAddTagSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    const cleanTag = newTagInput.trim().replace(/^#/, '').toLowerCase();
-    if (cleanTag && !note.tags.includes(cleanTag)) {
-      onAddTag(cleanTag);
+        const newText = modifiedLines.join('\n');
+        const updated = val.substring(0, lineStart) + newText + val.substring(actualEnd);
+        onChangeContent(updated);
+
+        setTimeout(() => {
+          textarea.selectionStart = lineStart;
+          textarea.selectionEnd = lineStart + newText.length;
+        }, 0);
+      } else {
+        // Single cursor position
+        if (e.shiftKey) {
+          const lineStart = val.lastIndexOf('\n', start - 1) + 1;
+          const beforeCursor = val.substring(lineStart, start);
+          if (beforeCursor.endsWith('  ')) {
+            const updated = val.substring(0, start - 2) + val.substring(start);
+            onChangeContent(updated);
+            setTimeout(() => {
+              textarea.selectionStart = textarea.selectionEnd = Math.max(lineStart, start - 2);
+            }, 0);
+          }
+        } else {
+          const updated = val.substring(0, start) + '  ' + val.substring(end);
+          onChangeContent(updated);
+
+          setTimeout(() => {
+            textarea.selectionStart = textarea.selectionEnd = start + 2;
+          }, 0);
+        }
+      }
     }
-    setNewTagInput('');
-    setShowTagInput(false);
   };
 
   return (
     <div className="flex-1 flex flex-col h-full w-full min-w-0 overflow-hidden bg-white dark:bg-black transition-colors duration-200 relative">
       {/* Top Header Bar */}
-      <div className="p-3 sm:p-4 border-b border-neutral-200 dark:border-neutral-800 space-y-2.5 shrink-0 w-full min-w-0 bg-neutral-50/50 dark:bg-neutral-950/50">
+      <div className="p-3 sm:p-4 border-b border-neutral-200 dark:border-neutral-800 shrink-0 w-full min-w-0 bg-neutral-50/50 dark:bg-neutral-950/50">
         <div className="flex items-center justify-between gap-2 min-w-0 w-full">
           <div className="flex items-center space-x-2 flex-1 min-w-0">
             {onBackToList && (
@@ -895,56 +1137,19 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
                 <span className="hidden xs:inline">Notes</span>
               </button>
             )}
-
-            {/* Inline Tags Row */}
-            <div className="flex items-center flex-wrap gap-1.5 min-w-0">
-              <div className="flex items-center text-xs text-neutral-400 dark:text-neutral-500 mr-0.5">
-                <TagIcon className="w-3.5 h-3.5 mr-1" />
-                <span className="hidden sm:inline">Tags:</span>
-              </div>
-
-              {note.tags.map((tag) => (
-                <span
-                  key={tag}
-                  className="inline-flex items-center px-2 py-0.5 rounded text-xs font-mono bg-neutral-100 dark:bg-neutral-900 text-neutral-800 dark:text-neutral-200 border border-neutral-200 dark:border-neutral-800"
-                >
-                  #{tag}
-                  <button
-                    onClick={() => onRemoveTag(tag)}
-                    className="ml-1 text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-100"
-                  >
-                    <X className="w-3 h-3" />
-                  </button>
-                </span>
-              ))}
-
-              {showTagInput ? (
-                <form onSubmit={handleAddTagSubmit} className="inline-flex items-center">
-                  <input
-                    type="text"
-                    autoFocus
-                    placeholder="tag_name..."
-                    value={newTagInput}
-                    onChange={(e) => setNewTagInput(e.target.value)}
-                    onBlur={() => {
-                      if (!newTagInput) setShowTagInput(false);
-                    }}
-                    className="w-24 px-2 py-0.5 text-xs bg-neutral-100 dark:bg-neutral-900 border border-neutral-400 dark:border-neutral-600 rounded text-neutral-900 dark:text-neutral-100 focus:outline-none"
-                  />
-                </form>
-              ) : (
-                <button
-                  onClick={() => setShowTagInput(true)}
-                  className="inline-flex items-center px-2 py-0.5 rounded text-xs font-mono text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-100 bg-neutral-100 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 transition-colors"
-                >
-                  <Plus className="w-3 h-3 mr-0.5" />
-                  <span>Add Tag</span>
-                </button>
-              )}
-            </div>
           </div>
 
           <div className="flex items-center space-x-1.5 shrink-0">
+            {/* Editor Mode Readout Toggle */}
+            <button
+              type="button"
+              onClick={() => setMode(mode === 'wysiwyg' ? 'markdown' : 'wysiwyg')}
+              title={`Switch to ${mode === 'wysiwyg' ? 'Markdown' : 'Rich Text'} mode`}
+              className="px-2.5 py-1 text-xs font-semibold rounded-lg bg-neutral-100 dark:bg-neutral-900 hover:bg-neutral-200 dark:hover:bg-neutral-800 text-neutral-700 dark:text-neutral-300 border border-neutral-200 dark:border-neutral-800 transition-colors flex items-center space-x-1"
+            >
+              <span>{mode === 'wysiwyg' ? 'Rich Text' : 'Markdown'}</span>
+            </button>
+
             {isSaved && (
               <span className="hidden sm:flex text-[11px] text-neutral-600 dark:text-neutral-300 items-center space-x-1 font-mono bg-neutral-100 dark:bg-neutral-900 px-2 py-0.5 rounded border border-neutral-200 dark:border-neutral-800">
                 <Check className="w-3 h-3 text-emerald-500" />
@@ -970,13 +1175,16 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
               type="button"
               onClick={() => setIsSlideoutOpen(true)}
               title="More Actions & Options"
-              className={`p-1.5 rounded-lg border transition-colors ${
+              className={`p-1.5 rounded-lg border transition-colors flex items-center space-x-1 ${
                 isSlideoutOpen
                   ? 'bg-neutral-900 text-white dark:bg-neutral-100 dark:text-black border-neutral-900 dark:border-neutral-100'
                   : 'bg-neutral-100 dark:bg-neutral-900 text-neutral-600 dark:text-neutral-400 hover:text-black dark:hover:text-white border-neutral-200 dark:border-neutral-800'
               }`}
             >
               <MoreVertical className="w-4 h-4" />
+              {note.tags.length > 0 && (
+                <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
+              )}
             </button>
           </div>
         </div>
@@ -1016,7 +1224,7 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
               type="button"
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => handleFormat('bold')}
-              title="Bold (⌘B)"
+              title={`Bold (${modSymbol}B)`}
               className={`p-2 rounded-lg transition-colors hover:bg-neutral-700/80 ${
                 activeFormats.bold ? 'text-blue-400 font-bold bg-neutral-700' : 'text-neutral-200'
               }`}
@@ -1028,7 +1236,7 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
               type="button"
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => handleFormat('italic')}
-              title="Italic (⌘I)"
+              title={`Italic (${modSymbol}I)`}
               className={`p-2 rounded-lg transition-colors hover:bg-neutral-700/80 ${
                 activeFormats.italic ? 'text-blue-400 font-bold bg-neutral-700' : 'text-neutral-200'
               }`}
@@ -1360,37 +1568,118 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
 
             {/* Content */}
             <div className="p-4 space-y-5 flex-1 overflow-y-auto">
-              {/* Editor Mode Selector */}
-              <div className="space-y-2">
-                <span className="block text-xs font-semibold text-neutral-800 dark:text-neutral-200">
-                  Editor Mode
-                </span>
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setMode('wysiwyg')}
-                    className={`p-3 rounded-xl border text-xs font-semibold flex flex-col items-center justify-center space-y-1.5 transition-all ${
-                      mode === 'wysiwyg'
-                        ? 'bg-black text-white dark:bg-white dark:text-black border-black dark:border-white shadow-xs'
-                        : 'bg-neutral-50 dark:bg-neutral-950 text-neutral-600 dark:text-neutral-400 border-neutral-200 dark:border-neutral-800 hover:bg-neutral-100 dark:hover:bg-neutral-800'
-                    }`}
-                  >
-                    <FileText className="w-4 h-4" />
-                    <span>Rich Text</span>
-                  </button>
+              {/* Tags Section */}
+              <div className="space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold text-neutral-800 dark:text-neutral-200 flex items-center space-x-1.5">
+                    <TagIcon className="w-3.5 h-3.5 text-neutral-500" />
+                    <span>Tags ({note.tags.length})</span>
+                  </span>
+                </div>
 
-                  <button
-                    type="button"
-                    onClick={() => setMode('markdown')}
-                    className={`p-3 rounded-xl border text-xs font-semibold flex flex-col items-center justify-center space-y-1.5 transition-all ${
-                      mode === 'markdown'
-                        ? 'bg-black text-white dark:bg-white dark:text-black border-black dark:border-white shadow-xs'
-                        : 'bg-neutral-50 dark:bg-neutral-950 text-neutral-600 dark:text-neutral-400 border-neutral-200 dark:border-neutral-800 hover:bg-neutral-100 dark:hover:bg-neutral-800'
-                    }`}
-                  >
-                    <Eye className="w-4 h-4" />
-                    <span>Markdown</span>
-                  </button>
+                {/* Current Note Tags */}
+                {note.tags.length > 0 ? (
+                  <div className="flex flex-wrap gap-1.5">
+                    {note.tags.map((tag) => (
+                      <span
+                        key={tag}
+                        className="inline-flex items-center px-2 py-0.5 rounded text-xs font-mono bg-neutral-100 dark:bg-neutral-800 text-neutral-800 dark:text-neutral-200 border border-neutral-200 dark:border-neutral-700/60"
+                      >
+                        {tag}
+                        <button
+                          type="button"
+                          onClick={() => onRemoveTag(tag)}
+                          className="ml-1 text-neutral-400 hover:text-red-500 dark:hover:text-red-400 transition-colors p-0.5 rounded"
+                          title={`Remove #${tag}`}
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-xs text-neutral-400 dark:text-neutral-500 italic">No tags attached to this note</p>
+                )}
+
+                {/* Add Tag & Existing Tags Dropdown */}
+                <div ref={tagDropdownRef} className="relative pt-1">
+                  <div className="relative flex items-center">
+                    <Plus className="w-3.5 h-3.5 absolute left-2.5 text-neutral-400 pointer-events-none" />
+                    <input
+                      type="text"
+                      placeholder="Add tag or select existing..."
+                      value={tagInput}
+                      onChange={(e) => {
+                        setTagInput(e.target.value);
+                        setIsTagDropdownOpen(true);
+                      }}
+                      onFocus={() => setIsTagDropdownOpen(true)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          if (cleanTypedTag) {
+                            handleAddTag(cleanTypedTag);
+                          }
+                        } else if (e.key === 'Escape') {
+                          setIsTagDropdownOpen(false);
+                        }
+                      }}
+                      className="w-full pl-8 pr-8 py-1.5 text-xs bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 rounded-lg text-neutral-900 dark:text-neutral-100 placeholder-neutral-400 focus:outline-none focus:ring-1 focus:ring-neutral-400 dark:focus:ring-neutral-600 font-mono"
+                    />
+                    {tagInput && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setTagInput('');
+                          setIsTagDropdownOpen(false);
+                        }}
+                        className="absolute right-2 text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Dropdown Menu of Existing Tags */}
+                  {isTagDropdownOpen && (
+                    <div className="absolute left-0 right-0 top-full mt-1 bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl shadow-2xl z-50 max-h-48 overflow-y-auto p-1 text-xs animate-in fade-in slide-in-from-top-1 duration-100">
+                      {availableExistingTags.length > 0 && (
+                        <div className="p-1 space-y-0.5">
+                          <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-neutral-400 dark:text-neutral-500">
+                            Select Existing Tag
+                          </div>
+                          {availableExistingTags.map((tag) => (
+                            <button
+                              key={tag}
+                              type="button"
+                              onClick={() => handleAddTag(tag)}
+                              className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-neutral-100 dark:hover:bg-neutral-800 flex items-center justify-between text-neutral-800 dark:text-neutral-200 font-mono transition-colors"
+                            >
+                              <span>{tag}</span>
+                              <Plus className="w-3 h-3 text-neutral-400" />
+                            </button>
+                          ))}
+                        </div>
+                      )}
+
+                      {cleanTypedTag && !note.tags.includes(cleanTypedTag) && (
+                        <button
+                          type="button"
+                          onClick={() => handleAddTag(cleanTypedTag)}
+                          className="w-full text-left px-2.5 py-1.5 rounded-lg bg-neutral-100/80 dark:bg-neutral-800/80 hover:bg-neutral-200 dark:hover:bg-neutral-700 text-neutral-900 dark:text-neutral-100 font-mono font-bold flex items-center justify-between transition-colors mt-0.5"
+                        >
+                          <span>Add new tag "#{cleanTypedTag}"</span>
+                          <Plus className="w-3.5 h-3.5 text-blue-500" />
+                        </button>
+                      )}
+
+                      {availableExistingTags.length === 0 && (!cleanTypedTag || note.tags.includes(cleanTypedTag)) && (
+                        <div className="p-3 text-center text-xs text-neutral-400 dark:text-neutral-500 italic">
+                          No existing tags to select. Type to create a new tag.
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -1439,6 +1728,28 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
                 <span className="font-semibold text-neutral-500 dark:text-neutral-400 block text-[10px] uppercase tracking-wider">
                   Note Info
                 </span>
+                <div className="flex justify-between text-neutral-600 dark:text-neutral-400">
+                  <span>Created:</span>
+                  <span className="font-mono font-medium text-neutral-900 dark:text-neutral-100">
+                    {new Date(note.createdAt).toLocaleDateString(undefined, {
+                      month: 'short',
+                      day: 'numeric',
+                      year: 'numeric',
+                    })}
+                  </span>
+                </div>
+                <div className="flex justify-between text-neutral-600 dark:text-neutral-400">
+                  <span>Last Edited:</span>
+                  <span className="font-mono font-medium text-neutral-900 dark:text-neutral-100">
+                    {new Date(note.updatedAt || note.createdAt).toLocaleDateString(undefined, {
+                      month: 'short',
+                      day: 'numeric',
+                      year: 'numeric',
+                      hour: '2-digit',
+                      minute: '2-digit',
+                    })}
+                  </span>
+                </div>
                 <div className="flex justify-between text-neutral-600 dark:text-neutral-400">
                   <span>Words:</span>
                   <span className="font-mono font-medium text-neutral-900 dark:text-neutral-100">

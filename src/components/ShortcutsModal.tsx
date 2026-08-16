@@ -1,6 +1,7 @@
 import React from 'react';
 import { X, Command } from 'lucide-react';
 import { KeyboardShortcut } from '../types';
+import { formatShortcut } from '../lib/platform';
 
 interface ShortcutsModalProps {
   isOpen: boolean;
@@ -11,21 +12,19 @@ export const ShortcutsModal: React.FC<ShortcutsModalProps> = ({ isOpen, onClose 
   if (!isOpen) return null;
 
   const shortcuts: KeyboardShortcut[] = [
-    { combination: '⌘ + K', description: 'Open Command Palette', key: 'k', category: 'General' },
-    { combination: '⌘ + N', description: 'Create New Note', key: 'n', category: 'General' },
-    { combination: '⌘ + F', description: 'Focus Note Search in Sidebar', key: 'f', category: 'General' },
-    { combination: '⌘ + ⇧ + D', description: 'Toggle Dark / Light Mode', key: 'd', category: 'General' },
-    { combination: '⌘ + ⇧ + B', description: 'Open Encrypted Backup Modal', key: 'b', category: 'General' },
+    { combination: 'Alt/Option + N', description: 'New Note', key: 'n', category: 'General' },
+    { combination: 'Ctrl/Cmd + K', description: 'Command Palette', key: 'k', category: 'General' },
+    { combination: 'Ctrl/Cmd + F', description: 'Search', key: 'f', category: 'General' },
+    { combination: 'Ctrl/Cmd + Shift + D', description: 'Dark/Light', key: 'd', category: 'General' },
+    { combination: 'Ctrl/Cmd + Shift + B', description: 'Encrypted Backup', key: 'b', category: 'General' },
 
-    { combination: '⌘ + P', description: 'Toggle Editor Mode (WYSIWYG / Markdown)', key: 'p', category: 'Navigation' },
-    { combination: 'Esc', description: 'Close Modals & Clear Search', key: 'Escape', category: 'Navigation' },
-    { combination: '?', description: 'Show Keyboard Shortcuts Cheat Sheet', key: '?', category: 'Navigation' },
+    { combination: 'Ctrl/Cmd + E', description: 'Editor/Markdown', key: 'e', category: 'Navigation' },
+    { combination: 'Esc', description: 'Close/Clear', key: 'Escape', category: 'Navigation' },
+    { combination: 'Shift + ?', description: 'Shortcuts', key: '?', category: 'Navigation' },
 
-    { combination: '⌘ + S', description: 'Save Note (Auto-save is active)', key: 's', category: 'Editing' },
-    { combination: '⌘ + B', description: 'Format Selection as Bold (**text**)', key: 'b', category: 'Editing' },
-    { combination: '⌘ + I', description: 'Format Selection as Italic (*text*)', key: 'i', category: 'Editing' },
-    { combination: '⌘ + H', description: 'Toggle Heading (Heading 1)', key: 'h', category: 'Editing' },
-    { combination: 'Tab', description: 'Indent Text in Editor', key: 'Tab', category: 'Editing' },
+    { combination: 'Ctrl/Cmd + B', description: 'Bold', key: 'b', category: 'Editing' },
+    { combination: 'Ctrl/Cmd + I', description: 'Italic', key: 'i', category: 'Editing' },
+    { combination: 'Tab / Shift+Tab', description: 'Indent/Outdent', key: 'Tab', category: 'Editing' },
   ];
 
   const categories = ['General', 'Navigation', 'Editing'] as const;
@@ -79,7 +78,7 @@ export const ShortcutsModal: React.FC<ShortcutsModalProps> = ({ isOpen, onClose 
                         {s.description}
                       </span>
                       <kbd className="px-2 py-0.5 bg-white dark:bg-black border border-neutral-200 dark:border-neutral-700 rounded text-xs font-mono font-semibold text-neutral-800 dark:text-neutral-200 shadow-2xs">
-                        {s.combination}
+                        {formatShortcut(s.combination)}
                       </kbd>
                     </div>
                   ))}

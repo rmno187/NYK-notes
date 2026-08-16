@@ -29,7 +29,7 @@ function parseInlineTokens(text: string): React.ReactNode[] {
       result.push(
         <code
           key={keyIndex++}
-          className="font-mono text-[10px] bg-neutral-200/80 dark:bg-neutral-800/90 text-neutral-800 dark:text-neutral-200 px-1 py-0.2 rounded border border-neutral-300/50 dark:border-neutral-700/50"
+          className="font-mono text-xs bg-neutral-200/80 dark:bg-neutral-800/90 text-neutral-800 dark:text-neutral-200 px-1 py-0.2 rounded border border-neutral-300/50 dark:border-neutral-700/50"
         >
           {codeText}
         </code>
@@ -40,7 +40,7 @@ function parseInlineTokens(text: string): React.ReactNode[] {
       if (linkMatch) {
         const label = linkMatch[1];
         result.push(
-          <span key={keyIndex++} className="text-blue-600 dark:text-blue-400 underline font-medium">
+          <span key={keyIndex++} className="text-blue-600 dark:text-blue-400 underline">
             {label}
           </span>
         );
@@ -54,7 +54,7 @@ function parseInlineTokens(text: string): React.ReactNode[] {
       // Bold
       const boldText = fullMatch.slice(2, -2);
       result.push(
-        <strong key={keyIndex++} className="font-bold text-neutral-900 dark:text-neutral-100">
+        <strong key={keyIndex++} className="font-bold text-current">
           {boldText}
         </strong>
       );
@@ -87,23 +87,25 @@ function renderLine(line: string): React.ReactNode {
   const text = line.trim();
   if (!text) return null;
 
-  // Checkboxes
-  if (/^(\*|-)\s+\[x\]\s+/i.test(text) || /^\[x\]\s+/i.test(text)) {
-    const cleanText = text.replace(/^(\*|-)\s+\[x\]\s+/i, '').replace(/^\[x\]\s+/i, '');
-    return (
-      <span className="inline-flex items-baseline space-x-1">
-        <span className="text-emerald-600 dark:text-emerald-400 font-bold shrink-0 mr-1">☑</span>
-        <span className="line-through opacity-75">{parseInlineTokens(cleanText)}</span>
-      </span>
-    );
-  }
+  // Checkboxes / Task list items (matches with or without bullet prefix, and any mark in brackets)
+  const taskMatch = text.match(/^(?:[-*+•]|\d+\.)?\s*\[([\s\S]?)\]\s*(.*)$/);
+  if (taskMatch) {
+    const mark = taskMatch[1];
+    const cleanText = taskMatch[2];
+    const isChecked = ['x', 'X', 'v', 'V', '1', '✓', '☑'].includes(mark);
 
-  if (/^(\*|-)\s+\[\s?\]\s+/i.test(text) || /^\[\s?\]\s+/i.test(text)) {
-    const cleanText = text.replace(/^(\*|-)\s+\[\s?\]\s+/i, '').replace(/^\[\s?\]\s+/i, '');
     return (
-      <span className="inline-flex items-baseline space-x-1">
-        <span className="text-neutral-400 dark:text-neutral-500 font-bold shrink-0 mr-1">☐</span>
-        <span>{parseInlineTokens(cleanText)}</span>
+      <span className="inline-flex items-center space-x-1.5 align-middle">
+        <input
+          type="checkbox"
+          checked={isChecked}
+          readOnly
+          tabIndex={-1}
+          className="w-3.5 h-3.5 rounded border-neutral-300 dark:border-neutral-600 text-white dark:black focus:ring-0 cursor-default pointer-events-none shrink-0 accent-black dark:accent-white"
+        />
+        <span className={isChecked ? 'line-through opacity-70' : ''}>
+          {parseInlineTokens(cleanText)}
+        </span>
       </span>
     );
   }
@@ -112,7 +114,7 @@ function renderLine(line: string): React.ReactNode {
   if (/^#+\s+/.test(text)) {
     const cleanText = text.replace(/^#+\s+/, '');
     return (
-      <span className="font-semibold text-neutral-900 dark:text-neutral-100">
+      <span className="font-semibold text-current">
         {parseInlineTokens(cleanText)}
       </span>
     );
@@ -123,7 +125,7 @@ function renderLine(line: string): React.ReactNode {
     const cleanText = text.replace(/^(\*|-|\+)\s+/, '');
     return (
       <span>
-        <span className="text-neutral-400 dark:text-neutral-500 font-bold mr-1">•</span>
+        <span className="text-current font-bold mr-1">•</span>
         {parseInlineTokens(cleanText)}
       </span>
     );
@@ -136,7 +138,7 @@ function renderLine(line: string): React.ReactNode {
     const cleanText = numMatch[2];
     return (
       <span>
-        <span className="text-neutral-400 dark:text-neutral-500 font-mono mr-1 text-[10px]">{numPrefix}</span>
+        <span className="text-current font-mono mr-1 text-xs">{numPrefix}</span>
         {parseInlineTokens(cleanText)}
       </span>
     );
@@ -147,7 +149,7 @@ function renderLine(line: string): React.ReactNode {
     const cleanCode = text.replace(/^```[a-z]*/i, '').replace(/```$/, '').trim();
     if (!cleanCode) return null;
     return (
-      <span className="font-mono text-[10px] bg-neutral-200/80 dark:bg-neutral-800 px-1.5 py-0.5 rounded text-neutral-800 dark:text-neutral-200 block truncate">
+      <span className="font-mono text-xs bg-neutral-200/80 dark:bg-neutral-800 px-1.5 py-0.5 rounded text-neutral-800 dark:text-neutral-200 block truncate">
         {cleanCode}
       </span>
     );
@@ -159,7 +161,7 @@ function renderLine(line: string): React.ReactNode {
 
 export const NotePreview: React.FC<NotePreviewProps> = ({ content }) => {
   if (!content || !content.trim()) {
-    return <span className="italic text-neutral-400 font-normal">Empty note...</span>;
+    return <span className="italic text-neutral-400 font-normal text-sm">Empty note...</span>;
   }
 
   // Convert HTML to standard markdown if it looks like HTML
@@ -180,13 +182,13 @@ export const NotePreview: React.FC<NotePreviewProps> = ({ content }) => {
     .filter(Boolean);
 
   if (lines.length === 0) {
-    return <span className="italic text-neutral-400 font-normal">Empty note...</span>;
+    return <span className="italic text-current font-normal text-sm">Empty note...</span>;
   }
 
   const displayLines = lines.slice(0, 4);
 
   return (
-    <div className="space-y-0.5 text-xs text-neutral-700 dark:text-neutral-300 font-normal leading-relaxed line-clamp-4">
+    <div className="space-y-0.5 text-sm text-neutral-700 dark:text-neutral-300 font-normal leading-relaxed line-clamp-4">
       {displayLines.map((line, idx) => {
         const rendered = renderLine(line);
         if (!rendered) return null;

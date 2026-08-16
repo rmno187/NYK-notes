@@ -10,7 +10,6 @@ import {
   Download,
   HelpCircle,
   ChevronRight,
-  Calendar,
   AlignLeft,
 } from 'lucide-react';
 import { StorageMode, Theme } from '../types';
@@ -20,8 +19,6 @@ interface SettingsModalProps {
   onClose: () => void;
   theme: Theme;
   onToggleTheme: () => void;
-  showDates: boolean;
-  onToggleShowDates: () => void;
   storageMode: StorageMode;
   directoryName?: string;
   onOpenDirectoryModal: () => void;
@@ -35,8 +32,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onClose,
   theme,
   onToggleTheme,
-  showDates,
-  onToggleShowDates,
   storageMode,
   directoryName,
   onOpenDirectoryModal,
@@ -123,37 +118,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 Switch to {theme === 'dark' ? 'Light' : 'Dark'}
               </button>
             </div>
-
-            {/* Show Dates Toggle */}
-            <div
-              onClick={onToggleShowDates}
-              className="p-3 bg-neutral-50 dark:bg-neutral-900/60 hover:bg-neutral-100 dark:hover:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl cursor-pointer flex items-center justify-between transition-colors gap-2"
-            >
-              <div className="flex items-center space-x-3 min-w-0">
-                <Calendar className="w-4 h-4 text-neutral-800 dark:text-neutral-200 shrink-0" />
-                <div className="min-w-0">
-                  <span className="text-xs font-semibold text-neutral-900 dark:text-neutral-100 block truncate">
-                    Show Dates on Notes
-                  </span>
-                  <span className="text-[11px] text-neutral-500 dark:text-neutral-400 block truncate">
-                    Display date stamps in the notes list
-                  </span>
-                </div>
-              </div>
-              <button
-                type="button"
-                className={`py-1 px-2.5 sm:px-3 text-xs font-medium rounded-lg transition-colors shrink-0 ${
-                  showDates
-                    ? 'bg-black text-white dark:bg-white dark:text-black'
-                    : 'bg-neutral-200 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300 hover:bg-neutral-300'
-                }`}
-              >
-                {showDates ? 'Enabled' : 'Disabled'}
-              </button>
-            </div>
-
-            {/* End of Show Dates toggle */}
-            
           </div>
 
           {/* Section: Storage */}

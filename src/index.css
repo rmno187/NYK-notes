@@ -59,11 +59,37 @@
   font-style: italic;
 }
 
-.editor-wysiwyg ul:not(.task-list):not(.contains-task-list) {
+.editor-wysiwyg ul:not(.task-list):not(.contains-task-list):not(:has(input[type="checkbox"])) {
   list-style-type: disc;
   padding-left: 1.5rem;
   margin-top: 0.5rem;
   margin-bottom: 0.5rem;
+}
+
+.editor-wysiwyg ul.task-list,
+.editor-wysiwyg ul.contains-task-list,
+.editor-wysiwyg ul:has(input[type="checkbox"]) {
+  list-style-type: none !important;
+  list-style: none !important;
+  padding-left: 0.25rem;
+  margin-top: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.editor-wysiwyg ul.task-list li,
+.editor-wysiwyg ul.contains-task-list li,
+.editor-wysiwyg li.task-list-item,
+.editor-wysiwyg li:has(input[type="checkbox"]) {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  list-style-type: none !important;
+  list-style: none !important;
+}
+
+.editor-wysiwyg li:has(input[type="checkbox"]:checked) {
+  opacity: 0.75;
+  text-decoration: line-through;
 }
 
 .editor-wysiwyg ol {
@@ -151,23 +177,6 @@
 
 :where(.dark) .editor-wysiwyg a {
   color: #60a5fa;
-}
-
-.editor-wysiwyg ul.task-list,
-.editor-wysiwyg ul.contains-task-list {
-  list-style-type: none;
-  padding-left: 0.25rem;
-  margin-top: 0.5rem;
-  margin-bottom: 0.5rem;
-}
-
-.editor-wysiwyg ul.task-list li,
-.editor-wysiwyg ul.contains-task-list li,
-.editor-wysiwyg li.task-list-item {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  list-style-type: none;
 }
 
 .editor-wysiwyg input[type="checkbox"] {
