@@ -135,6 +135,14 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
     }
   }, [note.id, note.content, mode]);
 
+  // Auto-expand textarea height in Markdown mode so all content scrolls cleanly in the outer container
+  useEffect(() => {
+    if (mode === 'markdown' && textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+      textareaRef.current.style.height = `${Math.max(350, textareaRef.current.scrollHeight)}px`;
+    }
+  }, [note.content, mode]);
+
   const focusContent = useCallback(() => {
     if (mode === 'wysiwyg' && wysiwygRef.current) {
       wysiwygRef.current.focus();
@@ -153,52 +161,100 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
     }
   }, [mode]);
 
-  // Auto-focus paragraph text when a new note is opened/created
-  const prevNoteIdRef = useRef<string>(note.id);
+  // History stack for exact Undo/Redo
+  const historyRef = useRef<{ content: string; selStart: number; selEnd: number }[]>([
+    { content: note.content, selStart: 0, selEnd: 0 },
+  ]);
+  const historyIdxRef = useRef<number>(0);
+  const isUndoRedoActionRef = useRef<boolean>(false);
+  const prevNoteIdForHistoryRef = useRef<string>(note.id);
+
   useEffect(() => {
-    const isBrandNewNote = Date.now() - note.createdAt < 3000 || (!note.title && !note.content);
-    if (prevNoteIdRef.current !== note.id || isBrandNewNote) {
-      prevNoteIdRef.current = note.id;
-      if (isBrandNewNote) {
-        const timer = setTimeout(() => {
-          focusContent();
-        }, 50);
-        return () => clearTimeout(timer);
+    if (prevNoteIdForHistoryRef.current !== note.id) {
+      prevNoteIdForHistoryRef.current = note.id;
+      historyRef.current = [{ content: note.content, selStart: 0, selEnd: 0 }];
+      historyIdxRef.current = 0;
+    }
+  }, [note.id, note.content]);
+
+  const pushHistory = useCallback((newContent: string, selStart?: number, selEnd?: number) => {
+    if (isUndoRedoActionRef.current) return;
+    const current = historyRef.current[historyIdxRef.current];
+    if (current && current.content === newContent) return;
+
+    let sStart = selStart;
+    let sEnd = selEnd;
+    if (sStart === undefined || sEnd === undefined) {
+      if (textareaRef.current) {
+        sStart = textareaRef.current.selectionStart;
+        sEnd = textareaRef.current.selectionEnd;
+      } else {
+        sStart = newContent.length;
+        sEnd = newContent.length;
       }
     }
-  }, [note.id, note.createdAt, note.title, note.content, focusContent]);
+
+    const trimmed = historyRef.current.slice(0, historyIdxRef.current + 1);
+    trimmed.push({ content: newContent, selStart: sStart, selEnd: sEnd });
+    if (trimmed.length > 150) trimmed.shift();
+    historyRef.current = trimmed;
+    historyIdxRef.current = trimmed.length - 1;
+  }, []);
+
+  const handleUndo = useCallback(() => {
+    if (historyIdxRef.current > 0) {
+      isUndoRedoActionRef.current = true;
+      historyIdxRef.current -= 1;
+      const target = historyRef.current[historyIdxRef.current];
+      onChangeContent(target.content);
+
+      if (mode === 'wysiwyg' && wysiwygRef.current) {
+        wysiwygRef.current.innerHTML = renderMarkdownToHtml(target.content) || '<p><br></p>';
+      }
+
+      setTimeout(() => {
+        if (mode === 'markdown' && textareaRef.current) {
+          textareaRef.current.focus();
+          textareaRef.current.setSelectionRange(target.selStart, target.selEnd);
+        } else if (mode === 'wysiwyg' && wysiwygRef.current) {
+          wysiwygRef.current.focus();
+        }
+        isUndoRedoActionRef.current = false;
+      }, 0);
+    }
+  }, [onChangeContent, mode]);
+
+  const handleRedo = useCallback(() => {
+    if (historyIdxRef.current < historyRef.current.length - 1) {
+      isUndoRedoActionRef.current = true;
+      historyIdxRef.current += 1;
+      const target = historyRef.current[historyIdxRef.current];
+      onChangeContent(target.content);
+
+      if (mode === 'wysiwyg' && wysiwygRef.current) {
+        wysiwygRef.current.innerHTML = renderMarkdownToHtml(target.content) || '<p><br></p>';
+      }
+
+      setTimeout(() => {
+        if (mode === 'markdown' && textareaRef.current) {
+          textareaRef.current.focus();
+          textareaRef.current.setSelectionRange(target.selStart, target.selEnd);
+        } else if (mode === 'wysiwyg' && wysiwygRef.current) {
+          wysiwygRef.current.focus();
+        }
+        isUndoRedoActionRef.current = false;
+      }, 0);
+    }
+  }, [onChangeContent, mode]);
 
   // Handle direct editing in WYSIWYG contentEditable div
   const handleWysiwygInput = useCallback(() => {
     if (!wysiwygRef.current) return;
     const html = wysiwygRef.current.innerHTML;
     const markdown = convertHtmlToMarkdown(html);
+    pushHistory(markdown);
     onChangeContent(markdown);
-  }, [onChangeContent]);
-
-  const handleUndo = useCallback(() => {
-    if (mode === 'wysiwyg' && wysiwygRef.current) {
-      wysiwygRef.current.focus();
-      document.execCommand('undo', false);
-      handleWysiwygInput();
-    } else if (mode === 'markdown' && textareaRef.current) {
-      textareaRef.current.focus();
-      document.execCommand('undo', false);
-      onChangeContent(textareaRef.current.value);
-    }
-  }, [mode, handleWysiwygInput, onChangeContent]);
-
-  const handleRedo = useCallback(() => {
-    if (mode === 'wysiwyg' && wysiwygRef.current) {
-      wysiwygRef.current.focus();
-      document.execCommand('redo', false);
-      handleWysiwygInput();
-    } else if (mode === 'markdown' && textareaRef.current) {
-      textareaRef.current.focus();
-      document.execCommand('redo', false);
-      onChangeContent(textareaRef.current.value);
-    }
-  }, [mode, handleWysiwygInput, onChangeContent]);
+  }, [onChangeContent, pushHistory]);
 
   // Handle interactive clicks inside WYSIWYG (e.g., checking/unchecking task checkboxes)
   const handleWysiwygClick = useCallback(
@@ -1544,21 +1600,24 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
             onInput={handleWysiwygInput}
             onClick={handleWysiwygClick}
             onKeyDown={handleWysiwygKeyDown}
-            className="editor-wysiwyg w-full min-h-[300px] outline-none text-neutral-900 dark:text-neutral-100"
+            className="editor-wysiwyg w-full min-h-[350px] outline-none text-neutral-900 dark:text-neutral-100"
           />
         ) : (
           <textarea
             ref={textareaRef}
             value={note.content}
-            onChange={(e) => onChangeContent(e.target.value)}
+            onChange={(e) => {
+              pushHistory(e.target.value, e.target.selectionStart, e.target.selectionEnd);
+              onChangeContent(e.target.value);
+            }}
             onKeyDown={handleKeyDownMarkdown}
             placeholder="Type raw markdown here..."
-            className="w-full min-h-[300px] resize-none bg-transparent text-neutral-900 dark:text-neutral-100 placeholder-neutral-400 dark:placeholder-neutral-600 font-mono text-sm leading-relaxed focus:outline-none"
+            className="w-full min-h-[350px] resize-none bg-transparent text-neutral-900 dark:text-neutral-100 placeholder-neutral-400 dark:placeholder-neutral-600 font-mono text-sm leading-relaxed focus:outline-none overflow-hidden"
           />
         )}
 
-        {/* Physical Bottom Spacer so the last lines of long notes scroll high above the fixed toolbar */}
-        <div className="h-72 sm:h-96 shrink-0 w-full pointer-events-none" aria-hidden="true" />
+        {/* Generous physical bottom spacer so the end of long notes scrolls high above the fixed bottom toolbar */}
+        <div className="h-96 sm:h-[480px] shrink-0 w-full pointer-events-none" aria-hidden="true" />
       </div>
 
       {/* Link Insertion Modal */}
