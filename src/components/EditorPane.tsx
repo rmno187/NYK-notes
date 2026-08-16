@@ -1248,10 +1248,13 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
             {onBackToList && (
               <button
   onClick={onBackToList}
-  className="md:hidden p-1.5 -ml-1 text-neutral-400 dark:text-neutral-600 hover:text-neutral-900 dark:hover:text-neutral-100 transition-colors shrink-0"
+  className="md:hidden p-1.5 -ml-1 text-neutral-500 dark:text-neutral-400 hover:text-black dark:hover:text-white transition-colors flex items-center shrink-0"
   title="Back to Notes"
 >
-  <ChevronLeft className="w-4 h-4" />
+  <span className="text-lg leading-none">←</span>
+  <span className="hidden xs:inline ml-1 text-xs font-medium">
+    Notes
+  </span>
 </button>
             )}
           </div>
@@ -1263,10 +1266,12 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
   onClick={() =>
     setMode(mode === 'wysiwyg' ? 'markdown' : 'wysiwyg')
   }
-  title={`Switch to ${mode === 'wysiwyg' ? 'Markdown' : 'Rich Text'} mode`}
-  className="px-1 py-1 text-[10px] font-mono text-neutral-400 dark:text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-100 transition-colors"
+  title={`Switch to ${
+    mode === 'wysiwyg' ? 'Markdown' : 'Rich Text'
+  } mode`}
+  className="px-1 py-1 text-xs font-sans tracking-wide underline underline-offset-2 text-neutral-500 dark:text-neutral-400 hover:text-black dark:hover:text-white transition-colors"
 >
-  {mode === 'wysiwyg' ? 'rich text' : 'markdown'}
+  {mode === 'wysiwyg' ? 'Rich Text' : 'Markdown'}
 </button>
 
             {/* Pin Note */}

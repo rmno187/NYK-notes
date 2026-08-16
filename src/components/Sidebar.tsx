@@ -452,23 +452,25 @@ export const Sidebar: React.FC<SidebarProps> = ({
             {/* ACTION BUTTONS: NEW NOTE & SETTINGS */}
             <div className="flex items-center space-x-1 shrink-0">
               <button
-                type="button"
-                onClick={() => onNewNote()}
-                className="flex items-center space-x-1 px-2.5 py-1.5 rounded-xl bg-neutral-900 dark:bg-neutral-100 text-white dark:text-black hover:bg-neutral-800 dark:hover:bg-neutral-200 transition-colors text-xs font-semibold shadow-xs"
-                title="Create New Note"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                <span>New note</span>
-              </button>
+  type="button"
+  onClick={() => onNewNote()}
+  className="flex items-center gap-1.5 px-1.5 py-1 text-xs font-sans font-semibold tracking-wide text-neutral-700 dark:text-neutral-300 hover:text-black dark:hover:text-white transition-colors"
+  title="Create New Note"
+>
+  <Plus className="w-3.5 h-3.5" />
+  <span className="underline underline-offset-4 decoration-neutral-300 dark:decoration-neutral-700 hover:decoration-current">
+    New note
+  </span>
+</button>
 
-              <button
-                type="button"
-                onClick={onOpenSettingsModal}
-                title="Open Settings"
-                className="p-1.5 text-neutral-500 hover:text-black dark:text-neutral-400 dark:hover:text-white rounded-lg hover:bg-neutral-200/60 dark:hover:bg-neutral-800/60 transition-colors"
-              >
-                <Settings className="w-4 h-4" />
-              </button>
+<button
+  type="button"
+  onClick={onOpenSettingsModal}
+  title="Open Settings"
+  className="p-1.5 text-neutral-400 hover:text-black dark:hover:text-white rounded-lg transition-colors"
+>
+  <Settings className="w-4 h-4" />
+</button>
             </div>
           </div>
 
