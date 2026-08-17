@@ -2,6 +2,17 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
+html, body, #root {
+  height: 100%;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  position: fixed;
+  inset: 0;
+  overscroll-behavior: none;
+}
+
 /*general fonts*/
 .note-title {
   font-size: 0.875rem;
@@ -186,3 +197,6 @@
   cursor: pointer;
   margin: 0;
 }
+
+/*editor toolbar */
+

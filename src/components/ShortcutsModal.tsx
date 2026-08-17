@@ -31,73 +31,88 @@ export const ShortcutsModal: React.FC<ShortcutsModalProps> = ({ isOpen, onClose 
   const categories = ['General', 'Navigation', 'Editing'] as const;
 
   return (
+  <div
+    className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-[2px] p-4"
+    onClick={onClose}
+  >
     <div
-      className="fixed inset-0 bg-neutral-950/70 backdrop-blur-xs z-50 flex items-center justify-center p-4"
-      onClick={onClose}
+      className="w-full max-w-xl bg-white dark:bg-black border border-neutral-200 dark:border-neutral-800 shadow-2xl"
+      onClick={(e) => e.stopPropagation()}
     >
-      <div
-        className="w-full max-w-lg bg-white dark:bg-black rounded-2xl shadow-2xl border border-neutral-200 dark:border-neutral-800 overflow-hidden"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="p-5 border-b border-neutral-200 dark:border-neutral-800 flex items-center justify-between">
-          <div className="flex items-center space-x-2.5">
-            <div className="p-2 bg-neutral-100 dark:bg-neutral-900 text-black dark:text-white rounded-lg">
-              <Command className="w-5 h-5" />
-            </div>
-            <div>
-              <h2 className="text-base font-bold text-neutral-900 dark:text-neutral-100">
-                Keyboard Shortcuts
-              </h2>
-              <p className="text-xs text-neutral-500 dark:text-neutral-400">
-                Speed up your markdown workflow
-              </p>
-            </div>
-          </div>
-          <button
-            onClick={onClose}
-            className="p-1.5 text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 rounded-md"
-          >
-            <X className="w-4 h-4" />
-          </button>
+      {/* Header */}
+      <div className="px-5 py-4 border-b border-neutral-200 dark:border-neutral-800 flex items-center justify-between">
+        <div>
+          <h2 className="text-sm font-semibold tracking-wide text-black dark:text-white">
+            Keyboard shortcuts
+          </h2>
+          <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-500">
+            A quick reference for working with your notes.
+          </p>
         </div>
 
-        <div className="p-5 space-y-5 max-h-[60vh] overflow-y-auto">
+        <button
+          type="button"
+          onClick={onClose}
+          className="p-1 text-neutral-400 hover:text-black dark:hover:text-white transition-colors"
+          title="Close"
+        >
+          <X className="w-4 h-4" />
+        </button>
+      </div>
+
+      {/* Shortcuts */}
+      <div className="px-5 py-5 max-h-[65vh] overflow-y-auto">
+        <div className="space-y-7">
           {categories.map((category) => {
-            const categoryShortcuts = shortcuts.filter((s) => s.category === category);
+            const categoryShortcuts = shortcuts.filter(
+              (s) => s.category === category
+            );
+
             return (
-              <div key={category} className="space-y-2">
-                <h3 className="text-xs font-semibold uppercase tracking-wider text-neutral-400 dark:text-neutral-500 font-mono">
-                  {category}
-                </h3>
-                <div className="grid grid-cols-1 gap-2">
+              <section key={category}>
+                {/* Category */}
+                <div className="mb-2.5 flex items-center gap-3">
+                  <h3 className="text-[10px] font-medium tracking-[0.12em] text-neutral-400 dark:text-neutral-600">
+                    {category}
+                  </h3>
+
+                  <div className="h-px flex-1 bg-neutral-200 dark:bg-neutral-800" />
+                </div>
+
+                {/* Shortcut list */}
+                <div>
                   {categoryShortcuts.map((s, i) => (
                     <div
                       key={i}
-                      className="p-2.5 rounded-lg bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 flex items-center justify-between"
+                      className="min-h-10 py-2 flex items-center justify-between gap-6 border-b border-neutral-100 dark:border-neutral-900 last:border-0"
                     >
-                      <span className="text-xs text-neutral-700 dark:text-neutral-300 font-medium">
+                      <span className="text-xs text-neutral-700 dark:text-neutral-300">
                         {s.description}
                       </span>
-                      <kbd className="px-2 py-0.5 bg-white dark:bg-black border border-neutral-200 dark:border-neutral-700 rounded text-xs font-mono font-semibold text-neutral-800 dark:text-neutral-200 shadow-2xs">
+
+                      <kbd className="shrink-0 text-[11px] font-mono text-black dark:text-white whitespace-nowrap">
                         {formatShortcut(s.combination)}
                       </kbd>
                     </div>
                   ))}
                 </div>
-              </div>
+              </section>
             );
           })}
         </div>
+      </div>
 
-        <div className="p-3 bg-neutral-50 dark:bg-black border-t border-neutral-200 dark:border-neutral-800 text-center">
-          <button
-            onClick={onClose}
-            className="px-4 py-1.5 bg-black text-white dark:bg-white dark:text-black text-xs font-semibold rounded-lg hover:bg-neutral-800 dark:hover:bg-neutral-200 transition-colors"
-          >
-            Got it
-          </button>
-        </div>
+      {/* Footer */}
+      <div className="px-5 py-3 border-t border-neutral-200 dark:border-neutral-800 flex justify-end">
+        <button
+          type="button"
+          onClick={onClose}
+          className="text-xs text-neutral-500 hover:text-black dark:hover:text-white underline underline-offset-4 decoration-neutral-300 dark:decoration-neutral-700 hover:decoration-black dark:hover:decoration-white transition-colors"
+        >
+          Close
+        </button>
       </div>
     </div>
-  );
+  </div>
+);
 };

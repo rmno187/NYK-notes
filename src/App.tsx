@@ -10,14 +10,14 @@ import {
   deleteNoteFromDirectory,
 } from './lib/storage';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
-import { convertHtmlToMarkdown } from './lib/markdown';
+import { convertHtmlToMarkdown, parseMarkdownNote } from './lib/markdown';
 import { isMac, modSymbol } from './lib/platform';
 import { Sidebar } from './components/Sidebar';
 import { EditorPane } from './components/EditorPane';
 import { DirectorySelectorModal } from './components/DirectorySelectorModal';
 import { BackupModal } from './components/BackupModal';
+import { ImportModal } from './components/ImportModal';
 import { ShortcutsModal } from './components/ShortcutsModal';
-import { SettingsModal } from './components/SettingsModal';
 
 const DEFAULT_WELCOME_NOTES: Note[] = [
   {
@@ -112,8 +112,8 @@ export default function App() {
   // Modals
   const [isDirectoryModalOpen, setIsDirectoryModalOpen] = useState(false);
   const [isBackupModalOpen, setIsBackupModalOpen] = useState(false);
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [isShortcutsModalOpen, setIsShortcutsModalOpen] = useState(false);
-  const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
 
   // Apply Theme Class & Save
   useEffect(() => {
@@ -605,22 +605,24 @@ export default function App() {
   };
 
   // Import Raw Markdown Files
-  const handleImportMarkdownFiles = async (files: FileList) => {
+  const handleImportMarkdownFiles = async (files: FileList | File[]) => {
     const newNotes: Note[] = [];
 
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i];
+    const fileArray = Array.from(files);
+    for (let i = 0; i < fileArray.length; i++) {
+      const file = fileArray[i];
       const text = await file.text();
-      const title = file.name.replace(/\.(md|markdown|txt)$/i, '');
+      const parsed = parseMarkdownNote(text, file.name);
 
       const importedNote: Note = {
-        id: `imported-${Date.now().toString(36)}-${i}`,
-        title: title || 'Imported Note',
-        content: text,
-        tags: ['imported'],
+        id: `imported-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
+        title: parsed.title,
+        content: parsed.content,
+        tags: parsed.tags,
+        pinned: parsed.pinned,
         createdAt: file.lastModified || Date.now(),
         updatedAt: file.lastModified || Date.now(),
-        pinned: false,
+        fileName: file.name,
       };
 
       newNotes.push(importedNote);
@@ -677,13 +679,13 @@ export default function App() {
       setSearchQuery('');
       setIsDirectoryModalOpen(false);
       setIsBackupModalOpen(false);
+      setIsImportModalOpen(false);
       setIsShortcutsModalOpen(false);
-      setIsSettingsModalOpen(false);
     },
   });
 
   return (
-    <div className="flex flex-col h-screen w-screen overflow-hidden bg-white dark:bg-black text-black dark:text-white font-sans antialiased transition-colors duration-200">
+    <div className="flex flex-col h-full w-full overflow-hidden fixed inset-0 bg-white dark:bg-black text-black dark:text-white font-sans antialiased transition-colors duration-200">
       {/* Main Workspace */}
       <div className="flex-1 flex overflow-hidden relative">
         {/* Sidebar */}
@@ -706,7 +708,6 @@ export default function App() {
           onSearchChange={setSearchQuery}
           isSearchMode={isSearchMode}
           onToggleSearchMode={() => setIsSearchMode((prev) => !prev)}
-          onOpenSettingsModal={() => setIsSettingsModalOpen(true)}
           className={mobileView === 'editor' ? 'hidden md:flex w-full md:w-80' : 'flex w-full md:w-80'}
         />
 
@@ -727,6 +728,14 @@ export default function App() {
               onAddTag={handleAddTag}
               onRemoveTag={handleRemoveTag}
               allTags={allTags}
+              theme={theme}
+              onToggleTheme={handleToggleTheme}
+              storageMode={storageMode}
+              directoryName={directoryName}
+              onOpenDirectoryModal={() => setIsDirectoryModalOpen(true)}
+              onOpenBackupModal={() => setIsBackupModalOpen(true)}
+              onOpenImportModal={() => setIsImportModalOpen(true)}
+              onOpenShortcutsModal={() => setIsShortcutsModalOpen(true)}
             />
           ) : (
             <div className="flex-1 flex flex-col items-center justify-center p-8 text-center bg-white dark:bg-black">
@@ -746,19 +755,6 @@ export default function App() {
       </div>
 
       {/* Overlays */}
-      <SettingsModal
-        isOpen={isSettingsModalOpen}
-        onClose={() => setIsSettingsModalOpen(false)}
-        theme={theme}
-        onToggleTheme={handleToggleTheme}
-        storageMode={storageMode}
-        directoryName={directoryName}
-        onOpenDirectoryModal={() => setIsDirectoryModalOpen(true)}
-        onOpenBackupModal={() => setIsBackupModalOpen(true)}
-        onOpenShortcutsModal={() => setIsShortcutsModalOpen(true)}
-        onImportMarkdownFiles={handleImportMarkdownFiles}
-      />
-
       <DirectorySelectorModal
         isOpen={isDirectoryModalOpen}
         onClose={() => setIsDirectoryModalOpen(false)}
@@ -772,6 +768,12 @@ export default function App() {
         isOpen={isBackupModalOpen}
         onClose={() => setIsBackupModalOpen(false)}
         notes={notes}
+      />
+
+      <ImportModal
+        isOpen={isImportModalOpen}
+        onClose={() => setIsImportModalOpen(false)}
+        onImportMarkdownFiles={handleImportMarkdownFiles}
         onImportRestoredNotes={handleImportRestoredNotes}
       />
 

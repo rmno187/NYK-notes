@@ -5,7 +5,6 @@ import {
   Search,
   Pin,
   Trash2,
-  Settings,
   RotateCcw,
   ArchiveX,
   CheckSquare,
@@ -31,7 +30,7 @@ interface SidebarProps {
   onBatchRestore?: (ids: string[]) => void;
   searchQuery: string;
   onSearchChange: (q: string) => void;
-  onOpenSettingsModal: () => void;
+  onOpenSettingsModal?: () => void;
   className?: string;
 }
 
@@ -46,7 +45,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onBatchRestore,
   searchQuery,
   onSearchChange,
-  onOpenSettingsModal,
   className = '',
 }) => {
   const [activeTab, setActiveTab] = useState<'notes' | 'trash'>('notes');
@@ -242,7 +240,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
       {selectedNoteIds.length > 0 ? (
         /* MULTI-SELECTION TOOLBAR */
-        <div className="px-3 py-3 flex items-center justify-between shrink-0 border-b border-neutral-200 dark:border-neutral-800">
+        <div className="px-3 py-3 flex items-center justify-between shrink-0 sticky top-0 z-10 bg-neutral-50 dark:bg-black border-b border-neutral-200 dark:border-neutral-800">
           <button
             onClick={() => setSelectedNoteIds([])}
             className="px-2 py-1 rounded hover:bg-neutral-200 dark:hover:bg-neutral-800 text-neutral-600 dark:text-neutral-300 transition-colors text-xs font-medium"
@@ -365,26 +363,25 @@ export const Sidebar: React.FC<SidebarProps> = ({
         /* ==================================================
            PRIMARY NAVIGATION & SEARCH HEADER
            ================================================== */
-
-        <div className="p-3 shrink-0 border-b border-transparent space-y-5">
-          {/* TOP ROW: LOGO/FOLDER SELECTOR + NEW NOTE + SETTINGS */}
-          <div className="flex items-center justify-between gap-1.5">
+        <div className="p-2.5 sm:p-3 shrink-0 sticky top-0 z-10 border-b border-transparent bg-neutral-50/95 dark:bg-black/95 backdrop-blur flex flex-col gap-2.5">
+          {/* ROW 1: FOLDER SELECTOR + NEW NOTE BUTTON */}
+          <div className="flex items-center justify-between gap-2 min-w-0">
             {/* INBOX / FOLDER SELECTOR WITH LOGO */}
-            <div ref={dropdownRef} className="relative min-w-0 flex-1">
+            <div ref={dropdownRef} className="relative shrink-0">
               <button
                 type="button"
                 onClick={() => setIsFolderDropdownOpen(!isFolderDropdownOpen)}
-                className="flex items-center space-x-2 p-1 rounded-xl hover:bg-neutral-200/60 dark:hover:bg-neutral-800/60 transition-colors text-xs font-semibold text-neutral-900 dark:text-neutral-100 max-w-full text-left"
+                className="flex items-center space-x-1.5 p-1 rounded-lg hover:bg-neutral-200/60 dark:hover:bg-neutral-800/60 transition-colors text-xs font-semibold text-neutral-900 dark:text-neutral-100 text-left"
                 title="Switch Folder / Category"
               >
                 {/* LOGO BADGE */}
-                <div className="w-6 h-6 rounded-lg overflow-hidden shrink-0">
-  <img
-    src="/logo.svg"
-    alt=""
-    className="w-full h-full object-contain"
-  />
-</div>
+                <div className="w-5 h-5 rounded overflow-hidden shrink-0">
+                  <img
+                    src="/logo.svg"
+                    alt=""
+                    className="w-full h-full object-contain"
+                  />
+                </div>
 
                 <span className="truncate font-sans font-bold text-xs">
                   {activeTab === 'notes'
@@ -401,7 +398,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
               {/* DROPDOWN MENU */}
               {isFolderDropdownOpen && (
-                <div className="absolute top-full left-0 mt-1.5 w-52 bg-white dark:bg-neutral-900 rounded-xl shadow-xl border border-neutral-200 dark:border-neutral-800 py-1.5 z-50 text-xs">
+                <div className="absolute top-full left-0 mt-1.5 w-48 bg-white dark:bg-neutral-900 rounded-xl shadow-xl border border-neutral-200 dark:border-neutral-800 py-1.5 z-50 text-xs">
                   {/* NOTES */}
                   <button
                     type="button"
@@ -416,7 +413,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     }`}
                   >
                     <div className="flex items-center space-x-2">
-                      
                       <span>Notes</span>
                     </div>
                     <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-neutral-100 dark:bg-neutral-800">
@@ -438,7 +434,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     }`}
                   >
                     <div className="flex items-center space-x-2">
-                      
                       <span>Trash</span>
                     </div>
                     <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-neutral-100 dark:bg-neutral-800 text-red-600 dark:text-red-400">
@@ -449,79 +444,69 @@ export const Sidebar: React.FC<SidebarProps> = ({
               )}
             </div>
 
-            {/* ACTION BUTTONS: NEW NOTE & SETTINGS */}
-            <div className="flex items-center space-x-1 shrink-0">
-              <button
-  type="button"
-  onClick={() => onNewNote()}
-  className="flex items-center gap-1.5 px-1.5 py-1 text-xs font-sans font-semibold tracking-wide text-neutral-700 dark:text-neutral-300 hover:text-black dark:hover:text-white transition-colors"
-  title="Create New Note"
->
-  <Plus className="w-3.5 h-3.5" />
-  <span className="underline underline-offset-4 decoration-neutral-300 dark:decoration-neutral-700 hover:decoration-current">
-    New note
-  </span>
-</button>
-
-<button
-  type="button"
-  onClick={onOpenSettingsModal}
-  title="Open Settings"
-  className="p-1.5 text-neutral-400 hover:text-black dark:hover:text-white rounded-lg transition-colors"
->
-  <Settings className="w-4 h-4" />
-</button>
-            </div>
+            {/* NEW NOTE BUTTON ON SAME ROW */}
+            <button
+              type="button"
+              onClick={() => onNewNote()}
+              className="flex items-center gap-1.5 px-2 py-1 text-xs font-sans font-semibold tracking-wide text-neutral-700 dark:text-neutral-300 hover:text-black dark:hover:text-white transition-colors"
+              title={`Create New Note (${modKey}+N)`}
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span className="underline underline-offset-4 decoration-neutral-300 dark:decoration-neutral-700 hover:decoration-current">
+                New note
+              </span>
+            </button>
           </div>
 
-          {/* SECOND ROW: SEARCH BAR */}
-         {/* SECOND ROW: MINIMAL SEARCH */}
-<div className="relative w-full">
-  <Search className="w-3.5 h-3.5 absolute left-0 top-1/2 -translate-y-1/2 text-neutral-400 pointer-events-none" />
+          {/* ROW 2: SEARCH BAR + SETTINGS BUTTON */}
+          <div className="flex items-center gap-2 min-w-0">
+            <div className="relative flex-1 min-w-[90px]">
+              <Search className="w-3.5 h-3.5 absolute left-1 top-1/2 -translate-y-1/2 text-neutral-400 pointer-events-none" />
 
-  <input
-    ref={searchInputRef}
-    type="text"
-    placeholder="Search notes..."
-    value={searchQuery}
-    onChange={(e) => onSearchChange(e.target.value)}
-    onKeyDown={(e) => {
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        onSearchChange('');
-        (e.target as HTMLInputElement).blur();
-      }
-    }}
-    className="
-      w-full
-      pl-5 pr-6 py-3
-      bg-transparent
-      border-0
-      border-b border-neutral-300 dark:border-neutral-700
-      rounded-none
-      text-xs
-      text-neutral-900 dark:text-neutral-100
-      placeholder-neutral-400
-      font-mono
-      focus:outline-none
-      focus:border-black dark:focus:border-white
-      transition-colors
-    "
-    title={`Search (${modKey}+F)`}
-/>
+              <input
+                ref={searchInputRef}
+                type="text"
+                placeholder="Search..."
+                value={searchQuery}
+                onChange={(e) => onSearchChange(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Escape') {
+                    e.preventDefault();
+                    onSearchChange('');
+                    (e.target as HTMLInputElement).blur();
+                  }
+                }}
+                className="
+                  w-full
+                  pl-5 pr-5 py-1
+                  bg-transparent
+                  border-0
+                  border-b border-neutral-300 dark:border-neutral-700
+                  rounded-none
+                  text-xs
+                  text-neutral-900 dark:text-neutral-100
+                  placeholder-neutral-400
+                  font-mono
+                  focus:outline-none
+                  focus:border-black dark:focus:border-white
+                  transition-colors
+                "
+                title={`Search (${modKey}+F)`}
+              />
 
-{/* CLEAR SEARCH */}
-{searchQuery && (
-  <button
-    type="button"
-    onClick={() => onSearchChange('')}
-    className="absolute right-0 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-black dark:hover:text-white transition-colors"
-    title="Clear Search"
-  >
-    ×
-  </button>
-)}
-</div>
+              {/* CLEAR SEARCH */}
+              {searchQuery && (
+                <button
+                  type="button"
+                  onClick={() => onSearchChange('')}
+                  className="absolute right-0 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-black dark:hover:text-white transition-colors text-sm px-1"
+                  title="Clear Search"
+                >
+                  ×
+                </button>
+              )}
+            </div>
+          </div>
         </div>
       )}
 

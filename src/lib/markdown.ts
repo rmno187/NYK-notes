@@ -61,22 +61,37 @@ export function convertHtmlToMarkdown(html: string): string {
 }
 
 /**
+ * Helper to parse comma/array formatted tags
+ */
+function parseTagsValue(value: string): string[] {
+  if (!value) return [];
+  const cleanVal = value.replace(/^\[|\]$/g, '').trim();
+  if (!cleanVal) return [];
+  return cleanVal
+    .split(',')
+    .map((t) => t.trim().replace(/^['"]|['"]$/g, '').replace(/^#/, ''))
+    .filter(Boolean);
+}
+
+/**
  * Parses frontmatter metadata from markdown string
  * e.g.
  * ---
- * title: My Note
- * tags: [ideas, work]
- * pinned: true
+ * title: ""
+ * tags: []
+ * pinned: false
  * ---
  * Content goes here...
  */
 export function parseMarkdownNote(rawContent: string, defaultFileName?: string) {
-  let title = defaultFileName ? defaultFileName.replace(/\.(md|markdown)$/i, '') : 'Untitled Note';
+  let title = '';
+  let hasExplicitTitle = false;
   let tags: string[] = [];
   let pinned = false;
-  let content = rawContent;
+  let content = (rawContent || '').replace(/^\uFEFF/, ''); // Strip UTF-8 BOM if present
 
-  const frontmatterMatch = rawContent.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/);
+  // 1. Check for YAML Frontmatter delimited by --- or +++
+  const frontmatterMatch = content.match(/^\s*(?:---|---)\r?\n([\s\S]*?)\r?\n(?:---|---)[ \t]*\r?\n?([\s\S]*)$/);
 
   if (frontmatterMatch) {
     const yamlStr = frontmatterMatch[1];
@@ -90,26 +105,75 @@ export function parseMarkdownNote(rawContent: string, defaultFileName?: string) 
         const value = line.slice(colonIdx + 1).trim();
 
         if (key === 'title') {
+          hasExplicitTitle = true;
           title = value.replace(/^['"]|['"]$/g, '');
         } else if (key === 'pinned') {
           pinned = value.toLowerCase() === 'true';
         } else if (key === 'tags') {
-          // parse [tag1, tag2] or comma separated
-          const cleanVal = value.replace(/^\[|\]$/g, '');
-          tags = cleanVal
-            .split(',')
-            .map((t) => t.trim().replace(/^['"]|['"]$/g, '').replace(/^#/, ''))
-            .filter(Boolean);
+          tags = parseTagsValue(value);
         }
       }
     });
+  } else {
+    // 2. Check if file starts with undelimited YAML/metadata headers at top
+    // e.g.:
+    // title: ""
+    // tags: []
+    // pinned: false
+    const lines = content.split('\n');
+    let headerLineCount = 0;
+    let foundHeaders = false;
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (!line) {
+        if (foundHeaders) {
+          headerLineCount = i + 1;
+          break;
+        }
+        continue;
+      }
+      const colonIdx = line.indexOf(':');
+      if (colonIdx !== -1) {
+        const key = line.slice(0, colonIdx).trim().toLowerCase();
+        const value = line.slice(colonIdx + 1).trim();
+        if (['title', 'tags', 'pinned', 'created', 'updated', 'date', 'id'].includes(key)) {
+          foundHeaders = true;
+          headerLineCount = i + 1;
+          if (key === 'title') {
+            hasExplicitTitle = true;
+            title = value.replace(/^['"]|['"]$/g, '');
+          } else if (key === 'pinned') {
+            pinned = value.toLowerCase() === 'true';
+          } else if (key === 'tags') {
+            tags = parseTagsValue(value);
+          }
+          continue;
+        }
+      }
+      break;
+    }
+
+    if (foundHeaders && headerLineCount > 0) {
+      content = lines.slice(headerLineCount).join('\n');
+    }
   }
 
-  // Fallback title extraction from first H1 line if not set in frontmatter
-  if (!frontmatterMatch) {
+  // Clean leading blank lines that were after frontmatter
+  content = content.replace(/^\r?\n+/, '');
+
+  // 3. Fallback title extraction if no explicit title was found in frontmatter/metadata:
+  if (!hasExplicitTitle) {
     const h1Match = content.match(/^#\s+(.+)$/m);
     if (h1Match) {
       title = h1Match[1].trim();
+    } else if (defaultFileName) {
+      const cleanName = defaultFileName.replace(/\.(md|markdown|txt)$/i, '').trim();
+      // If filename is a generated ID like "note-msuwvu9y", "note-123", "untitled-x", leave title blank
+      const isGeneratedId = /^(note|untitled)(-[a-z0-9]+)?$/i.test(cleanName);
+      if (!isGeneratedId) {
+        title = cleanName;
+      }
     }
   }
 

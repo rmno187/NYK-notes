@@ -19,17 +19,22 @@ import {
   X,
   Pin,
   Trash2,
-  Check,
-  Eye,
-  FileText,
-  Edit3,
-  ChevronLeft,
   RotateCcw,
-  Copy,
   Undo,
   Redo,
+  ArrowLeft,
+  Moon,
+  Sun,
+  HardDrive,
+  Database,
+  Key,
+  Download,
+  HelpCircle,
+  ChevronRight,
+  Settings,
+  FileText,
 } from 'lucide-react';
-import { Note, EditorMode } from '../types';
+import { Note, EditorMode, StorageMode, Theme } from '../types';
 import { modSymbol } from '../lib/platform';
 
 import { renderMarkdownToHtml, convertHtmlToMarkdown, applyFormatting } from '../lib/markdown';
@@ -48,6 +53,15 @@ interface EditorPaneProps {
   onChangeEditorMode?: (mode: EditorMode) => void;
   onToggleEditorMode?: () => void;
   onBackToList?: () => void;
+  // App Options & Settings
+  theme?: Theme;
+  onToggleTheme?: () => void;
+  storageMode?: StorageMode;
+  directoryName?: string;
+  onOpenDirectoryModal?: () => void;
+  onOpenBackupModal?: () => void;
+  onOpenImportModal?: () => void;
+  onOpenShortcutsModal?: () => void;
 }
 
 export const EditorPane: React.FC<EditorPaneProps> = ({
@@ -64,6 +78,14 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
   onChangeEditorMode,
   onToggleEditorMode,
   onBackToList,
+  theme,
+  onToggleTheme,
+  storageMode,
+  directoryName,
+  onOpenDirectoryModal,
+  onOpenBackupModal,
+  onOpenImportModal,
+  onOpenShortcutsModal,
 }) => {
   const [internalEditorMode, setInternalEditorMode] = useState<EditorMode>('wysiwyg');
   const mode = externalEditorMode || internalEditorMode;
@@ -149,8 +171,13 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
       const sel = window.getSelection();
       if (sel) {
         const range = document.createRange();
-        range.selectNodeContents(wysiwygRef.current);
-        range.collapse(false);
+        if (wysiwygRef.current.firstChild) {
+          range.selectNodeContents(wysiwygRef.current.firstChild);
+          range.collapse(true);
+        } else {
+          range.selectNodeContents(wysiwygRef.current);
+          range.collapse(true);
+        }
         sel.removeAllRanges();
         sel.addRange(range);
       }
@@ -160,6 +187,19 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
       textareaRef.current.setSelectionRange(len, len);
     }
   }, [mode]);
+
+  // Auto-focus on the row below the title when a new note is created
+  const prevActiveNoteIdRef = useRef<string>(note.id);
+  useEffect(() => {
+    const isNew = prevActiveNoteIdRef.current !== note.id;
+    prevActiveNoteIdRef.current = note.id;
+    if (isNew && (!note.title && !note.content)) {
+      const timer = setTimeout(() => {
+        focusContent();
+      }, 50);
+      return () => clearTimeout(timer);
+    }
+  }, [note.id, note.title, note.content, focusContent]);
 
   // History stack for exact Undo/Redo
   const historyRef = useRef<{ content: string; selStart: number; selEnd: number }[]>([
@@ -297,69 +337,6 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
   const [savedRange, setSavedRange] = useState<Range | null>(null);
   const [savedTextareaSel, setSavedTextareaSel] = useState<{ start: number; end: number } | null>(null);
 
-  // Bottom dock selection toolbar state & keyboard offset tracking
-  const [hasSelection, setHasSelection] = useState(false);
-  const [isMoreMenuOpen, setIsMoreMenuOpen] = useState(false);
-  const [keyboardOffset, setKeyboardOffset] = useState(0);
-
-  useEffect(() => {
-    if (typeof window === 'undefined' || !window.visualViewport) return;
-
-    const handleViewportResize = () => {
-      if (window.visualViewport) {
-        const offset = window.innerHeight - window.visualViewport.height - window.visualViewport.offsetTop;
-        setKeyboardOffset(Math.max(0, offset));
-      }
-    };
-
-    window.visualViewport.addEventListener('resize', handleViewportResize);
-    window.visualViewport.addEventListener('scroll', handleViewportResize);
-    return () => {
-      window.visualViewport?.removeEventListener('resize', handleViewportResize);
-      window.visualViewport?.removeEventListener('scroll', handleViewportResize);
-    };
-  }, []);
-
-  const updateSelectionState = useCallback(() => {
-    const sel = window.getSelection();
-    if (!sel || sel.isCollapsed) {
-      setHasSelection(false);
-      setIsMoreMenuOpen(false);
-      return;
-    }
-
-    if (sel.rangeCount > 0) {
-      const range = sel.getRangeAt(0);
-      const isInsideWysiwyg =
-        wysiwygRef.current && wysiwygRef.current.contains(range.commonAncestorContainer);
-      const isInsideTextarea =
-        textareaRef.current &&
-        textareaRef.current === document.activeElement &&
-        textareaRef.current.selectionStart !== textareaRef.current.selectionEnd;
-
-      if ((mode === 'wysiwyg' && isInsideWysiwyg) || (mode === 'markdown' && isInsideTextarea)) {
-        const text = mode === 'wysiwyg' ? range.toString().trim() : 'selected';
-        if (text.length > 0) {
-          setHasSelection(true);
-          return;
-        }
-      }
-    }
-
-    setHasSelection(false);
-    setIsMoreMenuOpen(false);
-  }, [mode]);
-
-  useEffect(() => {
-    const handleSelectionChange = () => {
-      setTimeout(updateSelectionState, 10);
-    };
-    document.addEventListener('selectionchange', handleSelectionChange);
-    return () => {
-      document.removeEventListener('selectionchange', handleSelectionChange);
-    };
-  }, [updateSelectionState]);
-
   // Helper to find block node and check if cursor is at start
   const getCaretBlockAndOffset = useCallback((container: HTMLElement) => {
     const sel = window.getSelection();
@@ -416,62 +393,6 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
     code: false,
     link: false,
   });
-
-  const [activeLineText, setActiveLineText] = useState('');
-  const [copiedFeedback, setCopiedFeedback] = useState(false);
-
-  const updateActiveLineText = useCallback(() => {
-    if (mode === 'wysiwyg' && wysiwygRef.current) {
-      const sel = window.getSelection();
-      if (sel && sel.anchorNode) {
-        let node: Node | null = sel.anchorNode;
-        if (node.nodeType === Node.TEXT_NODE) node = node.parentNode;
-        while (node && node !== wysiwygRef.current) {
-          const tag = (node as HTMLElement).tagName?.toUpperCase();
-          if (['P', 'H1', 'H2', 'H3', 'LI', 'BLOCKQUOTE', 'PRE', 'DIV', 'TR'].includes(tag)) {
-            const clone = (node as HTMLElement).cloneNode(true) as HTMLElement;
-            clone.querySelectorAll('input[type="checkbox"]').forEach((cb) => cb.remove());
-            const text = clone.textContent?.replace(/\s+/g, ' ').trim() || '';
-            setActiveLineText(text);
-            return;
-          }
-          node = node.parentNode;
-        }
-        setActiveLineText(sel.anchorNode.textContent?.trim() || '');
-        return;
-      }
-    } else if (mode === 'markdown' && textareaRef.current) {
-      const textarea = textareaRef.current;
-      const pos = textarea.selectionStart;
-      const lines = textarea.value.split('\n');
-      let count = 0;
-      for (const line of lines) {
-        if (pos >= count && pos <= count + line.length + 1) {
-          setActiveLineText(line.trim());
-          return;
-        }
-        count += line.length + 1;
-      }
-    }
-    setActiveLineText('');
-  }, [mode]);
-
-  useEffect(() => {
-    const handleSelectionChange = () => {
-      updateActiveLineText();
-    };
-    document.addEventListener('selectionchange', handleSelectionChange);
-    return () => {
-      document.removeEventListener('selectionchange', handleSelectionChange);
-    };
-  }, [updateActiveLineText]);
-
-  const handleQuickCopyLine = () => {
-    if (!activeLineText) return;
-    navigator.clipboard.writeText(activeLineText);
-    setCopiedFeedback(true);
-    setTimeout(() => setCopiedFeedback(false), 1500);
-  };
 
   // Check active formatting at cursor selection
   const checkActiveFormats = useCallback(() => {
@@ -1242,7 +1163,7 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
   return (
     <div className="flex-1 flex flex-col h-full w-full min-w-0 overflow-hidden bg-white dark:bg-black transition-colors duration-200 relative">
       {/* Top Header Bar */}
-      <div className="p-3 sm:p-4 border-b border-neutral-200 dark:border-neutral-800 shrink-0 w-full min-w-0 bg-neutral-50/50 dark:bg-neutral-950/50">
+      <div className="p-3 sm:p-4 border-b border-neutral-200 dark:border-neutral-800 shrink-0 sticky top-0 z-20 w-full min-w-0 bg-neutral-50/95 dark:bg-neutral-950/95 backdrop-blur">
         <div className="flex items-center justify-between gap-2 min-w-0 w-full">
           <div className="flex items-center space-x-2 flex-1 min-w-0">
             {onBackToList && (
@@ -1251,9 +1172,10 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
   className="md:hidden p-1.5 -ml-1 text-neutral-500 dark:text-neutral-400 hover:text-black dark:hover:text-white transition-colors flex items-center shrink-0"
   title="Back to Notes"
 >
-  <span className="text-lg leading-none">←</span>
-  <span className="hidden xs:inline ml-1 text-xs font-medium">
-    Notes
+  <ArrowLeft className="w-4 h-4" />
+
+  <span className="px-1 py-1 text-xs font-sans tracking-wide text-neutral-500 dark:text-neutral-400 hover:text-black dark:hover:text-white transition-colors">
+    Back
   </span>
 </button>
             )}
@@ -1293,26 +1215,246 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
 </button>
 
             {/* More Actions */}
-<button
-  type="button"
-  onClick={() => setIsSlideoutOpen(true)}
-  title="More Actions & Options"
-  className={`relative p-1.5 transition-colors ${
-    isSlideoutOpen
-      ? 'text-neutral-900 dark:text-neutral-100'
-      : 'text-neutral-400 dark:text-neutral-600 hover:text-neutral-900 dark:hover:text-neutral-100'
-  }`}
->
-  <MoreVertical className="w-4 h-4" />
-
-  {note.tags.length > 0 && (
-    <span className="absolute top-0.5 right-0.5 w-1.5 h-1.5 rounded-full bg-blue-500" />
-  )}
-</button>
+            <button
+              type="button"
+              onClick={() => setIsSlideoutOpen(true)}
+              title="More Actions & Options"
+              className={`p-1.5 transition-colors ${
+                isSlideoutOpen
+                  ? 'text-neutral-900 dark:text-neutral-100'
+                  : 'text-neutral-400 dark:text-neutral-600 hover:text-neutral-900 dark:hover:text-neutral-100'
+              }`}
+            >
+              <MoreVertical className="w-4 h-4" />
+            </button>
           </div>
         </div>
       </div>
 
+
+
+      {/* Formatting Toolbar */}
+      <div
+        onMouseDown={(e) => e.preventDefault()}
+        className="shrink-0 border-b border-neutral-200 dark:border-neutral-800 px-3 sm:px-5 py-1.5 bg-transparent select-none"
+      >
+        <div className="flex items-center gap-0.5 overflow-x-auto scrollbar-none">
+          {/* History */}
+          <button
+            type="button"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={handleUndo}
+            title={`Undo (${modSymbol}Z)`}
+            className="p-1.5 rounded-md transition-colors text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-100 hover:bg-neutral-100 dark:hover:bg-neutral-800/60 shrink-0"
+          >
+            <Undo className="w-4 h-4" />
+          </button>
+
+          <button
+            type="button"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={handleRedo}
+            title={`Redo (${modSymbol}Y)`}
+            className="p-1.5 rounded-md transition-colors text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-100 hover:bg-neutral-100 dark:hover:bg-neutral-800/60 shrink-0"
+          >
+            <Redo className="w-4 h-4" />
+          </button>
+
+          <div className="w-px h-4 bg-neutral-200 dark:bg-neutral-800 mx-1 shrink-0" />
+
+          {/* Text Style: Bold, Italic, Underline, Link */}
+          <button
+            type="button"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => handleFormat('bold')}
+            title={`Bold (${modSymbol}B)`}
+            className={`p-1.5 rounded-md transition-colors shrink-0 ${
+              activeFormats.bold
+                ? 'bg-neutral-200 dark:bg-neutral-800 text-blue-600 dark:text-blue-400 font-bold'
+                : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-100 hover:bg-neutral-100 dark:hover:bg-neutral-800/60'
+            }`}
+          >
+            <Bold className="w-4 h-4" />
+          </button>
+
+          <button
+            type="button"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => handleFormat('italic')}
+            title={`Italic (${modSymbol}I)`}
+            className={`p-1.5 rounded-md transition-colors shrink-0 ${
+              activeFormats.italic
+                ? 'bg-neutral-200 dark:bg-neutral-800 text-blue-600 dark:text-blue-400 font-bold'
+                : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-100 hover:bg-neutral-100 dark:hover:bg-neutral-800/60'
+            }`}
+          >
+            <Italic className="w-4 h-4" />
+          </button>
+
+          <button
+            type="button"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => {
+              if (mode === 'wysiwyg') {
+                document.execCommand('underline', false);
+                handleWysiwygInput();
+                checkActiveFormats();
+              } else {
+                handleFormat('bold');
+              }
+            }}
+            title="Underline"
+            className={`p-1.5 rounded-md transition-colors shrink-0 ${
+              activeFormats.underline
+                ? 'bg-neutral-200 dark:bg-neutral-800 text-blue-600 dark:text-blue-400 font-bold'
+                : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-100 hover:bg-neutral-100 dark:hover:bg-neutral-800/60'
+            }`}
+          >
+            <Underline className="w-4 h-4" />
+          </button>
+
+          <button
+            type="button"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => handleFormat('link')}
+            title="Insert Link"
+            className={`p-1.5 rounded-md transition-colors shrink-0 ${
+              activeFormats.link
+                ? 'bg-neutral-200 dark:bg-neutral-800 text-blue-600 dark:text-blue-400 font-bold'
+                : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-100 hover:bg-neutral-100 dark:hover:bg-neutral-800/60'
+            }`}
+          >
+            <Link className="w-4 h-4" />
+          </button>
+
+          <div className="w-px h-4 bg-neutral-200 dark:bg-neutral-800 mx-1 shrink-0" />
+
+          {/* Headings */}
+          <button
+            type="button"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => handleFormat('heading')}
+            title="Heading 1"
+            className={`p-1.5 rounded-md transition-colors shrink-0 ${
+              activeFormats.heading
+                ? 'bg-neutral-200 dark:bg-neutral-800 text-blue-600 dark:text-blue-400 font-bold'
+                : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-100 hover:bg-neutral-100 dark:hover:bg-neutral-800/60'
+            }`}
+          >
+            <Heading1 className="w-4 h-4" />
+          </button>
+
+          <button
+            type="button"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => handleFormat('h2')}
+            title="Heading 2"
+            className={`p-1.5 rounded-md transition-colors shrink-0 ${
+              activeFormats.h2
+                ? 'bg-neutral-200 dark:bg-neutral-800 text-blue-600 dark:text-blue-400 font-bold'
+                : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-100 hover:bg-neutral-100 dark:hover:bg-neutral-800/60'
+            }`}
+          >
+            <Heading2 className="w-4 h-4" />
+          </button>
+
+          <div className="w-px h-4 bg-neutral-200 dark:bg-neutral-800 mx-1 shrink-0" />
+
+          {/* Lists */}
+          <button
+            type="button"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => handleFormat('bullet')}
+            title="Bullet List"
+            className={`p-1.5 rounded-md transition-colors shrink-0 ${
+              activeFormats.bullet
+                ? 'bg-neutral-200 dark:bg-neutral-800 text-blue-600 dark:text-blue-400 font-bold'
+                : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-100 hover:bg-neutral-100 dark:hover:bg-neutral-800/60'
+            }`}
+          >
+            <List className="w-4 h-4" />
+          </button>
+
+          <button
+            type="button"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => handleFormat('number')}
+            title="Numbered List"
+            className={`p-1.5 rounded-md transition-colors shrink-0 ${
+              activeFormats.number
+                ? 'bg-neutral-200 dark:bg-neutral-800 text-blue-600 dark:text-blue-400 font-bold'
+                : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-100 hover:bg-neutral-100 dark:hover:bg-neutral-800/60'
+            }`}
+          >
+            <ListOrdered className="w-4 h-4" />
+          </button>
+
+          <button
+            type="button"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => handleFormat('task')}
+            title="Task List"
+            className={`p-1.5 rounded-md transition-colors shrink-0 ${
+              activeFormats.task
+                ? 'bg-neutral-200 dark:bg-neutral-800 text-blue-600 dark:text-blue-400 font-bold'
+                : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-100 hover:bg-neutral-100 dark:hover:bg-neutral-800/60'
+            }`}
+          >
+            <CheckSquare className="w-4 h-4" />
+          </button>
+
+          <div className="w-px h-4 bg-neutral-200 dark:bg-neutral-800 mx-1 shrink-0" />
+
+          {/* Blocks */}
+          <button
+            type="button"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => handleFormat('code')}
+            title="Code Block"
+            className={`p-1.5 rounded-md transition-colors shrink-0 ${
+              activeFormats.code
+                ? 'bg-neutral-200 dark:bg-neutral-800 text-blue-600 dark:text-blue-400 font-bold'
+                : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-100 hover:bg-neutral-100 dark:hover:bg-neutral-800/60'
+            }`}
+          >
+            <Code className="w-4 h-4" />
+          </button>
+
+          <button
+            type="button"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => handleFormat('quote')}
+            title="Quote"
+            className={`p-1.5 rounded-md transition-colors shrink-0 ${
+              activeFormats.quote
+                ? 'bg-neutral-200 dark:bg-neutral-800 text-blue-600 dark:text-blue-400 font-bold'
+                : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-100 hover:bg-neutral-100 dark:hover:bg-neutral-800/60'
+            }`}
+          >
+            <Quote className="w-4 h-4" />
+          </button>
+
+          <button
+            type="button"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => handleFormat('table')}
+            title="Insert Table"
+            className="p-1.5 rounded-md transition-colors text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-100 hover:bg-neutral-100 dark:hover:bg-neutral-800/60 shrink-0"
+          >
+            <Table className="w-4 h-4" />
+          </button>
+
+          <button
+            type="button"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => handleFormat('hr')}
+            title="Horizontal Line"
+            className="p-1.5 rounded-md transition-colors text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-100 hover:bg-neutral-100 dark:hover:bg-neutral-800/60 shrink-0"
+          >
+            <Minus className="w-4 h-4" />
+          </button>
+        </div>
+      </div>
 
 
       {/* Content Area: Title + WYSIWYG or Raw Markdown */}
@@ -1332,269 +1474,6 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
             }}
             className="w-full text-2xl sm:text-3xl font-extrabold bg-transparent text-neutral-900 dark:text-neutral-100 placeholder-neutral-300 dark:placeholder-neutral-700 focus:outline-none tracking-tight"
           />
-        </div>
-
-        {/* Permanent Docked Editing Toolbar */}
-        <div
-          style={{
-            bottom: `${keyboardOffset}px`,
-          }}
-          onMouseDown={(e) => e.preventDefault()}
-          className="fixed inset-x-0 z-50 bg-neutral-900/95 dark:bg-neutral-800/95 text-white backdrop-blur-md border-t border-neutral-700/80 px-4 py-2 flex items-center justify-center shadow-2xl animate-in slide-in-from-bottom-2 duration-150 select-none"
-        >
-          <div className="flex items-center space-x-2 sm:space-x-3 max-w-xs sm:max-w-md w-full justify-around">
-            <button
-              type="button"
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={handleUndo}
-              title={`Undo (${modSymbol}Z)`}
-              className="p-2 rounded-lg transition-colors text-neutral-200 hover:bg-neutral-700/80"
-            >
-              <Undo className="w-4 h-4" />
-            </button>
-
-            <button
-              type="button"
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={handleRedo}
-              title={`Redo (${modSymbol}Y)`}
-              className="p-2 rounded-lg transition-colors text-neutral-200 hover:bg-neutral-700/80"
-            >
-              <Redo className="w-4 h-4" />
-            </button>
-
-            <div className="w-px h-5 bg-neutral-700 my-auto" />
-
-            <button
-              type="button"
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={() => handleFormat('bold')}
-              title={`Bold (${modSymbol}B)`}
-              className={`p-2 rounded-lg transition-colors hover:bg-neutral-700/80 ${
-                activeFormats.bold ? 'text-blue-400 font-bold bg-neutral-700' : 'text-neutral-200'
-              }`}
-            >
-              <Bold className="w-4 h-4" />
-            </button>
-
-            <button
-              type="button"
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={() => handleFormat('italic')}
-              title={`Italic (${modSymbol}I)`}
-              className={`p-2 rounded-lg transition-colors hover:bg-neutral-700/80 ${
-                activeFormats.italic ? 'text-blue-400 font-bold bg-neutral-700' : 'text-neutral-200'
-              }`}
-            >
-              <Italic className="w-4 h-4" />
-            </button>
-
-            <button
-              type="button"
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={() => {
-                if (mode === 'wysiwyg') {
-                  document.execCommand('underline', false);
-                  handleWysiwygInput();
-                  checkActiveFormats();
-                } else {
-                  handleFormat('bold');
-                }
-              }}
-              title="Underline"
-              className={`p-2 rounded-lg transition-colors hover:bg-neutral-700/80 ${
-                activeFormats.underline ? 'text-blue-400 font-bold bg-neutral-700' : 'text-neutral-200'
-              }`}
-            >
-              <Underline className="w-4 h-4" />
-            </button>
-
-            <button
-              type="button"
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={() => handleFormat('link')}
-              title="Insert Link"
-              className={`p-2 rounded-lg transition-colors hover:bg-neutral-700/80 ${
-                activeFormats.link ? 'text-blue-400 font-bold bg-neutral-700' : 'text-neutral-200'
-              }`}
-            >
-              <Link className="w-4 h-4" />
-            </button>
-
-            <div className="w-px h-5 bg-neutral-700 my-auto" />
-
-            {/* Submenu Toggle (⋮) */}
-            <div className="relative">
-              <button
-                type="button"
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => setIsMoreMenuOpen((prev) => !prev)}
-                title="More formatting options"
-                className={`p-2 rounded-lg transition-colors hover:bg-neutral-700/80 ${
-                  isMoreMenuOpen ||
-                  activeFormats.heading ||
-                  activeFormats.h2 ||
-                  activeFormats.bullet ||
-                  activeFormats.number ||
-                  activeFormats.task ||
-                  activeFormats.code ||
-                  activeFormats.quote
-                    ? 'bg-neutral-700 text-blue-400 font-bold'
-                    : 'text-neutral-200'
-                }`}
-              >
-                <MoreVertical className="w-4 h-4" />
-              </button>
-
-              {/* Submenu opens UPWARD above the bottom bar */}
-              {isMoreMenuOpen && (
-                <div
-                  onMouseDown={(e) => e.preventDefault()}
-                  className="absolute right-0 bottom-full mb-2.5 w-52 bg-neutral-900 border border-neutral-700 rounded-xl p-1.5 shadow-2xl flex flex-col space-y-0.5 text-xs text-neutral-200 z-50 animate-in fade-in slide-in-from-bottom-2 duration-100 max-h-64 overflow-y-auto"
-                >
-                  <button
-                    type="button"
-                    onClick={() => {
-                      handleFormat('heading');
-                      setIsMoreMenuOpen(false);
-                    }}
-                    className={`flex items-center space-x-2.5 px-3 py-2 rounded-lg text-left transition-colors ${
-                      activeFormats.heading ? 'bg-neutral-800 text-blue-400 font-semibold' : 'text-neutral-200 hover:bg-neutral-800'
-                    }`}
-                  >
-                    <Heading1 className="w-4 h-4 text-neutral-400" />
-                    <span>Heading 1</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      handleFormat('h2');
-                      setIsMoreMenuOpen(false);
-                    }}
-                    className={`flex items-center space-x-2.5 px-3 py-2 rounded-lg text-left transition-colors ${
-                      activeFormats.h2 ? 'bg-neutral-800 text-blue-400 font-semibold' : 'text-neutral-200 hover:bg-neutral-800'
-                    }`}
-                  >
-                    <Heading2 className="w-4 h-4 text-neutral-400" />
-                    <span>Heading 2</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      handleFormat('bullet');
-                      setIsMoreMenuOpen(false);
-                    }}
-                    className={`flex items-center space-x-2.5 px-3 py-2 rounded-lg text-left transition-colors ${
-                      activeFormats.bullet ? 'bg-neutral-800 text-blue-400 font-semibold' : 'text-neutral-200 hover:bg-neutral-800'
-                    }`}
-                  >
-                    <List className="w-4 h-4 text-neutral-400" />
-                    <span>Bullet List</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      handleFormat('number');
-                      setIsMoreMenuOpen(false);
-                    }}
-                    className={`flex items-center space-x-2.5 px-3 py-2 rounded-lg text-left transition-colors ${
-                      activeFormats.number ? 'bg-neutral-800 text-blue-400 font-semibold' : 'text-neutral-200 hover:bg-neutral-800'
-                    }`}
-                  >
-                    <ListOrdered className="w-4 h-4 text-neutral-400" />
-                    <span>Numbered List</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      handleFormat('task');
-                      setIsMoreMenuOpen(false);
-                    }}
-                    className={`flex items-center space-x-2.5 px-3 py-2 rounded-lg text-left transition-colors ${
-                      activeFormats.task ? 'bg-neutral-800 text-blue-400 font-semibold' : 'text-neutral-200 hover:bg-neutral-800'
-                    }`}
-                  >
-                    <CheckSquare className="w-4 h-4 text-neutral-400" />
-                    <span>Task List</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      handleFormat('code');
-                      setIsMoreMenuOpen(false);
-                    }}
-                    className={`flex items-center space-x-2.5 px-3 py-2 rounded-lg text-left transition-colors ${
-                      activeFormats.code ? 'bg-neutral-800 text-blue-400 font-semibold' : 'text-neutral-200 hover:bg-neutral-800'
-                    }`}
-                  >
-                    <Code className="w-4 h-4 text-neutral-400" />
-                    <span>Code Block</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      handleFormat('quote');
-                      setIsMoreMenuOpen(false);
-                    }}
-                    className={`flex items-center space-x-2.5 px-3 py-2 rounded-lg text-left transition-colors ${
-                      activeFormats.quote ? 'bg-neutral-800 text-blue-400 font-semibold' : 'text-neutral-200 hover:bg-neutral-800'
-                    }`}
-                  >
-                    <Quote className="w-4 h-4 text-neutral-400" />
-                    <span>Quote</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      handleFormat('table');
-                      setIsMoreMenuOpen(false);
-                    }}
-                    className="flex items-center space-x-2.5 px-3 py-2 text-neutral-200 hover:bg-neutral-800 rounded-lg text-left transition-colors"
-                  >
-                    <Table className="w-4 h-4 text-neutral-400" />
-                    <span>Table</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      handleFormat('hr');
-                      setIsMoreMenuOpen(false);
-                    }}
-                    className="flex items-center space-x-2.5 px-3 py-2 text-neutral-200 hover:bg-neutral-800 rounded-lg text-left transition-colors"
-                  >
-                    <Minus className="w-4 h-4 text-neutral-400" />
-                    <span>Horizontal Line</span>
-                  </button>
-                </div>
-              )}
-            </div>
-
-            <div className="w-px h-5 bg-neutral-700 my-auto" />
-
-            {/* Quick Copy Line Button */}
-            <button
-              type="button"
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={handleQuickCopyLine}
-              disabled={!activeLineText}
-              title={
-                activeLineText
-                  ? `Quick copy line: "${activeLineText.slice(0, 30)}${activeLineText.length > 30 ? '...' : ''}"`
-                  : 'Quick copy line (place cursor on a line with text)'
-              }
-              className={`p-2 rounded-lg transition-all flex items-center justify-center ${
-                activeLineText
-                  ? 'text-neutral-100 hover:bg-neutral-700/80 cursor-pointer opacity-100'
-                  : 'text-neutral-500 opacity-40 cursor-not-allowed'
-              }`}
-            >
-              {copiedFeedback ? (
-                <Check className="w-4 h-4 text-emerald-400 animate-in zoom-in-50 duration-150" />
-              ) : (
-                <Copy className="w-4 h-4" />
-              )}
-            </button>
-          </div>
         </div>
 
         {mode === 'wysiwyg' ? (
@@ -1620,9 +1499,6 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
             className="w-full min-h-[350px] resize-none bg-transparent text-neutral-900 dark:text-neutral-100 placeholder-neutral-400 dark:placeholder-neutral-600 font-mono text-sm leading-relaxed focus:outline-none overflow-hidden"
           />
         )}
-
-        {/* Generous physical bottom spacer so the end of long notes scrolls high above the fixed bottom toolbar */}
-        <div className="h-96 sm:h-[480px] shrink-0 w-full pointer-events-none" aria-hidden="true" />
       </div>
 
       {/* Link Insertion Modal */}
@@ -1701,221 +1577,397 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
             className="absolute inset-0 bg-black/20 dark:bg-black/50 z-30 transition-opacity backdrop-blur-[1px]"
           />
 
-          {/* Slideout Drawer Panel */}
-          <div className="absolute top-0 right-0 bottom-0 w-72 sm:w-80 bg-white dark:bg-neutral-900 border-l border-neutral-200 dark:border-neutral-800 shadow-2xl z-40 flex flex-col transform transition-transform duration-200 ease-in-out animate-in slide-in-from-right">
-            {/* Header */}
-            <div className="p-3.5 border-b border-neutral-200 dark:border-neutral-800 flex items-center justify-between bg-neutral-50 dark:bg-neutral-950">
-              <span className="text-xs font-bold uppercase tracking-wider text-neutral-500 dark:text-neutral-400">
-                Note Options
+          {/* Minimal Slideout Drawer */}
+<div className="absolute inset-y-0 right-0 w-80 sm:w-96 max-w-[92vw] bg-white dark:bg-black border-l border-neutral-200 dark:border-neutral-800 z-40 flex flex-col animate-in slide-in-from-right duration-200">
+
+  {/* Header */}
+  <div className="h-14 px-5 flex items-center justify-between border-b border-neutral-200 dark:border-neutral-800 shrink-0">
+    <span className="text-sm font-medium tracking-wide text-black dark:text-white">
+      Options
+    </span>
+
+    <button
+      type="button"
+      onClick={() => setIsSlideoutOpen(false)}
+      className="p-1.5 text-neutral-500 hover:text-black dark:hover:text-white transition-colors"
+      title="Close"
+    >
+      <X className="w-4 h-4" />
+    </button>
+  </div>
+
+  {/* Content */}
+  <div className="flex-1 overflow-y-auto px-5 py-6">
+
+    {/* ============================================================ */}
+    {/* TAGS */}
+    {/* ============================================================ */}
+
+    <section className="pb-7">
+
+      <div className="flex items-center justify-between mb-3">
+        <span className="text-xs font-medium tracking-wide text-black dark:text-white">
+          Tags
+        </span>
+
+        <span className="text-[11px] text-neutral-400 dark:text-neutral-600">
+          {note.tags.length}
+        </span>
+      </div>
+
+      {/* Current Tags */}
+      {note.tags.length > 0 ? (
+        <div className="flex flex-wrap gap-x-3 gap-y-2 mb-4">
+          {note.tags.map((tag) => (
+            <span
+              key={tag}
+              className="inline-flex items-center gap-1 text-xs text-black dark:text-white"
+            >
+              <span className="underline underline-offset-2 decoration-neutral-300 dark:decoration-neutral-700">
+                {tag}
               </span>
+
               <button
-                onClick={() => setIsSlideoutOpen(false)}
-                className="p-1 text-neutral-500 hover:text-black dark:hover:text-white rounded-lg hover:bg-neutral-200 dark:hover:bg-neutral-800 transition-colors"
-                title="Close Options"
+                type="button"
+                onClick={() => onRemoveTag(tag)}
+                className="text-neutral-400 hover:text-black dark:hover:text-white transition-colors"
+                title={`Remove #${tag}`}
               >
-                <X className="w-4 h-4" />
+                <X className="w-3 h-3" />
               </button>
-            </div>
+            </span>
+          ))}
+        </div>
+      ) : (
+        <p className="text-xs text-neutral-400 dark:text-neutral-600 mb-4">
+          No tags
+        </p>
+      )}
 
-            {/* Content */}
-            <div className="p-4 space-y-5 flex-1 overflow-y-auto">
-              {/* Tags Section */}
-              <div className="space-y-2.5">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-semibold text-neutral-800 dark:text-neutral-200 flex items-center space-x-1.5">
-                    <TagIcon className="w-3.5 h-3.5 text-neutral-500" />
-                    <span>Tags ({note.tags.length})</span>
-                  </span>
+      {/* Add Tag */}
+      <div ref={tagDropdownRef} className="relative">
+
+        <div className="relative">
+          <input
+            type="text"
+            placeholder="Add tag..."
+            value={tagInput}
+            onChange={(e) => {
+              setTagInput(e.target.value);
+              setIsTagDropdownOpen(true);
+            }}
+            onFocus={() => setIsTagDropdownOpen(true)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+
+                if (cleanTypedTag) {
+                  handleAddTag(cleanTypedTag);
+                }
+              } else if (e.key === 'Escape') {
+                setIsTagDropdownOpen(false);
+              }
+            }}
+            className="w-full font-mono bg-transparent border-b border-neutral-300 dark:border-neutral-700 py-2 pr-7 text-sm text-black dark:text-white placeholder-neutral-400 dark:placeholder-neutral-600 focus:outline-none focus:border-black dark:focus:border-white transition-colors"
+          />
+
+          {tagInput && (
+            <button
+              type="button"
+              onClick={() => {
+                setTagInput('');
+                setIsTagDropdownOpen(false);
+              }}
+              className="absolute right-0 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-black dark:hover:text-white"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </div>
+
+        {/* Tag Dropdown */}
+        {isTagDropdownOpen && (
+          <div className="absolute left-0 right-0 top-full mt-2 bg-white dark:bg-black border border-neutral-200 dark:border-neutral-800 shadow-xl z-50 max-h-48 overflow-y-auto">
+
+            {availableExistingTags.length > 0 && (
+              <div className="py-1">
+
+                <div className="px-3 py-2 text-[10px] tracking-widest text-neutral-400 dark:text-neutral-600">
+                  EXISTING
                 </div>
 
-                {/* Current Note Tags */}
-                {note.tags.length > 0 ? (
-                  <div className="flex flex-wrap gap-1.5">
-                    {note.tags.map((tag) => (
-                      <span
-                        key={tag}
-                        className="inline-flex items-center px-2 py-0.5 rounded text-xs font-mono bg-neutral-100 dark:bg-neutral-800 text-neutral-800 dark:text-neutral-200 border border-neutral-200 dark:border-neutral-700/60"
-                      >
-                        {tag}
-                        <button
-                          type="button"
-                          onClick={() => onRemoveTag(tag)}
-                          className="ml-1 text-neutral-400 hover:text-red-500 dark:hover:text-red-400 transition-colors p-0.5 rounded"
-                          title={`Remove #${tag}`}
-                        >
-                          <X className="w-3 h-3" />
-                        </button>
-                      </span>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-xs text-neutral-400 dark:text-neutral-500 italic">No tags attached to this note</p>
-                )}
-
-                {/* Add Tag & Existing Tags Dropdown */}
-                <div ref={tagDropdownRef} className="relative pt-1">
-                  <div className="relative flex items-center">
-                    <Plus className="w-3.5 h-3.5 absolute left-2.5 text-neutral-400 pointer-events-none" />
-                    <input
-                      type="text"
-                      placeholder="Add tag or select existing..."
-                      value={tagInput}
-                      onChange={(e) => {
-                        setTagInput(e.target.value);
-                        setIsTagDropdownOpen(true);
-                      }}
-                      onFocus={() => setIsTagDropdownOpen(true)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') {
-                          e.preventDefault();
-                          if (cleanTypedTag) {
-                            handleAddTag(cleanTypedTag);
-                          }
-                        } else if (e.key === 'Escape') {
-                          setIsTagDropdownOpen(false);
-                        }
-                      }}
-                      className="w-full pl-8 pr-8 py-1.5 text-xs bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 rounded-lg text-neutral-900 dark:text-neutral-100 placeholder-neutral-400 focus:outline-none focus:ring-1 focus:ring-neutral-400 dark:focus:ring-neutral-600 font-mono"
-                    />
-                    {tagInput && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setTagInput('');
-                          setIsTagDropdownOpen(false);
-                        }}
-                        className="absolute right-2 text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200"
-                      >
-                        <X className="w-3 h-3" />
-                      </button>
-                    )}
-                  </div>
-
-                  {/* Dropdown Menu of Existing Tags */}
-                  {isTagDropdownOpen && (
-                    <div className="absolute left-0 right-0 top-full mt-1 bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl shadow-2xl z-50 max-h-48 overflow-y-auto p-1 text-xs animate-in fade-in slide-in-from-top-1 duration-100">
-                      {availableExistingTags.length > 0 && (
-                        <div className="p-1 space-y-0.5">
-                          <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-neutral-400 dark:text-neutral-500">
-                            Select Existing Tag
-                          </div>
-                          {availableExistingTags.map((tag) => (
-                            <button
-                              key={tag}
-                              type="button"
-                              onClick={() => handleAddTag(tag)}
-                              className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-neutral-100 dark:hover:bg-neutral-800 flex items-center justify-between text-neutral-800 dark:text-neutral-200 font-mono transition-colors"
-                            >
-                              <span>{tag}</span>
-                              <Plus className="w-3 h-3 text-neutral-400" />
-                            </button>
-                          ))}
-                        </div>
-                      )}
-
-                      {cleanTypedTag && !note.tags.includes(cleanTypedTag) && (
-                        <button
-                          type="button"
-                          onClick={() => handleAddTag(cleanTypedTag)}
-                          className="w-full text-left px-2.5 py-1.5 rounded-lg bg-neutral-100/80 dark:bg-neutral-800/80 hover:bg-neutral-200 dark:hover:bg-neutral-700 text-neutral-900 dark:text-neutral-100 font-mono font-bold flex items-center justify-between transition-colors mt-0.5"
-                        >
-                          <span>Add new tag "#{cleanTypedTag}"</span>
-                          <Plus className="w-3.5 h-3.5 text-blue-500" />
-                        </button>
-                      )}
-
-                      {availableExistingTags.length === 0 && (!cleanTypedTag || note.tags.includes(cleanTypedTag)) && (
-                        <div className="p-3 text-center text-xs text-neutral-400 dark:text-neutral-500 italic">
-                          No existing tags to select. Type to create a new tag.
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
+                {availableExistingTags.map((tag) => (
+                  <button
+                    key={tag}
+                    type="button"
+                    onClick={() => handleAddTag(tag)}
+                    className="w-full px-3 py-2 text-left text-xs text-black dark:text-white hover:bg-neutral-100 dark:hover:bg-neutral-900 transition-colors"
+                  >
+                    {tag}
+                  </button>
+                ))}
               </div>
+            )}
 
-              <hr className="border-neutral-200 dark:border-neutral-800" />
+            {cleanTypedTag && !note.tags.includes(cleanTypedTag) && (
+              <button
+                type="button"
+                onClick={() => handleAddTag(cleanTypedTag)}
+                className="w-full px-3 py-2.5 text-left text-xs text-black dark:text-white border-t border-neutral-200 dark:border-neutral-800 hover:bg-neutral-100 dark:hover:bg-neutral-900 transition-colors"
+              >
+                Add <span className="underline underline-offset-2">#{cleanTypedTag}</span>
+              </button>
+            )}
 
-              {/* Trash / Restore Actions */}
-              <div className="space-y-2">
-                <span className="block text-xs font-semibold text-neutral-800 dark:text-neutral-200">
-                  Actions
-                </span>
-                {note.deletedAt ? (
-                  onRestoreNote && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        onRestoreNote();
-                        setIsSlideoutOpen(false);
-                      }}
-                      className="w-full p-2.5 rounded-xl border border-emerald-300 dark:border-emerald-800/80 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 transition-colors flex items-center justify-center space-x-2 text-xs font-bold"
-                    >
-                      <RotateCcw className="w-4 h-4" />
-                      <span>Restore Note</span>
-                    </button>
-                  )
-                ) : (
-                  onDeleteNote && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        onDeleteNote();
-                        setIsSlideoutOpen(false);
-                      }}
-                      className="w-full p-2.5 rounded-xl border border-red-200 dark:border-red-900/50 bg-red-50 dark:bg-red-950/30 text-red-600 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/50 transition-colors flex items-center justify-center space-x-2 text-xs font-bold"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                      <span>Move to Trash</span>
-                    </button>
-                  )
-                )}
-              </div>
-
-              <hr className="border-neutral-200 dark:border-neutral-800" />
-
-              {/* Note Metadata */}
-              <div className="p-3 bg-neutral-50 dark:bg-neutral-950 rounded-xl border border-neutral-200 dark:border-neutral-800 text-xs space-y-2">
-                <span className="font-semibold text-neutral-500 dark:text-neutral-400 block text-[10px] uppercase tracking-wider">
-                  Note Info
-                </span>
-                <div className="flex justify-between text-neutral-600 dark:text-neutral-400">
-                  <span>Created:</span>
-                  <span className="font-mono font-medium text-neutral-900 dark:text-neutral-100">
-                    {new Date(note.createdAt).toLocaleDateString(undefined, {
-                      month: 'short',
-                      day: 'numeric',
-                      year: 'numeric',
-                    })}
-                  </span>
+            {availableExistingTags.length === 0 &&
+              (!cleanTypedTag || note.tags.includes(cleanTypedTag)) && (
+                <div className="px-3 py-3 text-xs text-neutral-400 dark:text-neutral-600">
+                  Type a tag to create one.
                 </div>
-                <div className="flex justify-between text-neutral-600 dark:text-neutral-400">
-                  <span>Last Edited:</span>
-                  <span className="font-mono font-medium text-neutral-900 dark:text-neutral-100">
-                    {new Date(note.updatedAt || note.createdAt).toLocaleDateString(undefined, {
-                      month: 'short',
-                      day: 'numeric',
-                      year: 'numeric',
-                      hour: '2-digit',
-                      minute: '2-digit',
-                    })}
-                  </span>
-                </div>
-                <div className="flex justify-between text-neutral-600 dark:text-neutral-400">
-                  <span>Words:</span>
-                  <span className="font-mono font-medium text-neutral-900 dark:text-neutral-100">
-                    {note.content.trim() ? note.content.trim().split(/\s+/).length : 0}
-                  </span>
-                </div>
-                <div className="flex justify-between text-neutral-600 dark:text-neutral-400">
-                  <span>Characters:</span>
-                  <span className="font-mono font-medium text-neutral-900 dark:text-neutral-100">
-                    {note.content.length}
-                  </span>
-                </div>
-              </div>
-            </div>
+              )}
           </div>
+        )}
+      </div>
+    </section>
+
+
+    {/* ============================================================ */}
+    {/* NOTE ACTIONS */}
+    {/* ============================================================ */}
+
+    <section className="border-t border-neutral-200 dark:border-neutral-800 py-6">
+
+      <div className="mb-4">
+        <span className="text-xs font-medium tracking-wide text-black dark:text-white">
+          Note
+        </span>
+      </div>
+
+      <div className="flex flex-col items-start gap-3">
+
+        {note.deletedAt ? (
+          onRestoreNote && (
+            <button
+              type="button"
+              onClick={() => {
+                onRestoreNote();
+                setIsSlideoutOpen(false);
+              }}
+              className="text-sm text-black dark:text-white hover:underline underline-offset-4 transition-all"
+            >
+              Restore note
+            </button>
+          )
+        ) : (
+          onDeleteNote && (
+            <button
+              type="button"
+              onClick={() => {
+                onDeleteNote();
+                setIsSlideoutOpen(false);
+              }}
+              className="text-sm text-black dark:text-white hover:underline underline-offset-4 transition-all"
+            >
+              Move to trash
+            </button>
+          )
+        )}
+
+      </div>
+    </section>
+
+
+    {/* ============================================================ */}
+    {/* NOTE INFORMATION */}
+    {/* ============================================================ */}
+
+    <section className="border-t border-neutral-200 dark:border-neutral-800 py-6">
+
+      <div className="mb-4">
+        <span className="text-xs font-medium tracking-wide text-black dark:text-white">
+          Information
+        </span>
+      </div>
+
+      <div className="space-y-2 text-xs">
+
+        <div className="flex justify-between gap-4">
+          <span className="text-neutral-500 dark:text-neutral-500">
+            Created
+          </span>
+
+          <span className="text-black dark:text-white text-right">
+            {new Date(note.createdAt).toLocaleDateString(undefined, {
+              month: 'short',
+              day: 'numeric',
+              year: 'numeric',
+            })}
+          </span>
+        </div>
+
+        <div className="flex justify-between gap-4">
+          <span className="text-neutral-500 dark:text-neutral-500">
+            Edited
+          </span>
+
+          <span className="text-black dark:text-white text-right">
+            {new Date(note.updatedAt || note.createdAt).toLocaleDateString(
+              undefined,
+              {
+                month: 'short',
+                day: 'numeric',
+                year: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit',
+              }
+            )}
+          </span>
+        </div>
+
+        <div className="flex justify-between gap-4">
+          <span className="text-neutral-500 dark:text-neutral-500">
+            Words
+          </span>
+
+          <span className="text-black dark:text-white">
+            {note.content.trim()
+              ? note.content.trim().split(/\s+/).length
+              : 0}
+          </span>
+        </div>
+
+        <div className="flex justify-between gap-4">
+          <span className="text-neutral-500 dark:text-neutral-500">
+            Characters
+          </span>
+
+          <span className="text-black dark:text-white">
+            {note.content.length}
+          </span>
+        </div>
+
+      </div>
+    </section>
+
+
+    {/* ============================================================ */}
+    {/* APP SETTINGS */}
+    {/* ============================================================ */}
+
+    <section className="border-t border-neutral-200 dark:border-neutral-800 py-6">
+
+      <div className="mb-4">
+        <span className="text-xs font-medium tracking-wide text-black dark:text-white">
+          Settings
+        </span>
+      </div>
+
+      <div className="flex flex-col">
+
+        {/* Theme */}
+        {onToggleTheme && (
+          <button
+            type="button"
+            onClick={onToggleTheme}
+            className="group flex items-center justify-between py-2.5 text-left"
+          >
+            <span className="text-sm text-black dark:text-white group-hover:underline underline-offset-4">
+              Theme
+            </span>
+
+            <span className="text-xs text-neutral-400 dark:text-neutral-600">
+              {theme === 'dark' ? 'Dark' : 'Light'}
+            </span>
+          </button>
+        )}
+
+        {/* Storage */}
+        {onOpenDirectoryModal && (
+          <button
+            type="button"
+            onClick={() => {
+              onOpenDirectoryModal();
+              setIsSlideoutOpen(false);
+            }}
+            className="group flex items-center justify-between py-2.5 text-left"
+          >
+            <span className="text-sm text-black dark:text-white group-hover:underline underline-offset-4">
+              Storage
+            </span>
+
+            <span className="text-xs text-neutral-400 dark:text-neutral-600 max-w-[150px] truncate">
+              {storageMode === 'filesystem' && directoryName
+                ? directoryName
+                : 'Browser'}
+            </span>
+          </button>
+        )}
+
+        {/* Backup */}
+        {onOpenBackupModal && (
+          <button
+            type="button"
+            onClick={() => {
+              onOpenBackupModal();
+              setIsSlideoutOpen(false);
+            }}
+            className="group flex items-center justify-between py-2.5 text-left"
+          >
+            <span className="text-sm text-black dark:text-white group-hover:underline underline-offset-4">
+              Backup
+            </span>
+
+            <span className="text-xs text-neutral-400 dark:text-neutral-600">
+              Export
+            </span>
+          </button>
+        )}
+
+        {/* Import */}
+        {onOpenImportModal && (
+          <button
+            type="button"
+            onClick={() => {
+              onOpenImportModal();
+              setIsSlideoutOpen(false);
+            }}
+            className="group flex items-center justify-between py-2.5 text-left"
+          >
+            <span className="text-sm text-black dark:text-white group-hover:underline underline-offset-4">
+              Import
+            </span>
+
+            <span className="text-xs text-neutral-400 dark:text-neutral-600">
+              Markdown / Backup
+            </span>
+          </button>
+        )}
+
+        {/* Shortcuts */}
+        {onOpenShortcutsModal && (
+          <button
+            type="button"
+            onClick={() => {
+              onOpenShortcutsModal();
+              setIsSlideoutOpen(false);
+            }}
+            className="group flex items-center justify-between py-2.5 text-left"
+          >
+            <span className="text-sm text-black dark:text-white group-hover:underline underline-offset-4">
+              Keyboard shortcuts
+            </span>
+
+            <span className="text-xs text-neutral-400 dark:text-neutral-600">
+              ?
+            </span>
+          </button>
+        )}
+
+      </div>
+    </section>
+
+  </div>
+</div>
         </>
       )}
     </div>

@@ -41,147 +41,149 @@ export const DirectorySelectorModal: React.FC<DirectorySelectorModalProps> = ({
   };
 
   return (
+  <div
+    className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-[2px] p-4"
+    onClick={onClose}
+  >
     <div
-      className="fixed inset-0 bg-neutral-950/70 backdrop-blur-xs z-50 flex items-center justify-center p-4"
-      onClick={onClose}
+      className="w-full max-w-xl bg-white dark:bg-black border border-neutral-200 dark:border-neutral-800 shadow-2xl"
+      onClick={(e) => e.stopPropagation()}
     >
-      <div
-        className="w-full max-w-lg bg-white dark:bg-black rounded-2xl shadow-2xl border border-neutral-200 dark:border-neutral-800 overflow-hidden"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="p-5 border-b border-neutral-200 dark:border-neutral-800 flex items-center justify-between">
-          <div className="flex items-center space-x-2.5">
-            <div className="p-2 bg-neutral-100 dark:bg-neutral-900 text-black dark:text-white rounded-lg">
-              <HardDrive className="w-5 h-5" />
-            </div>
-            <div>
-              <h2 className="text-base font-bold text-neutral-900 dark:text-neutral-100">
-                Storage Destination
-              </h2>
-              <p className="text-xs text-neutral-500 dark:text-neutral-400">
-                Choose where your markdown files are stored
-              </p>
-            </div>
-          </div>
-          <button
-            onClick={onClose}
-            className="p-1.5 text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 rounded-md"
-          >
-            <X className="w-4 h-4" />
-          </button>
+      {/* Header */}
+      <div className="px-5 py-4 border-b border-neutral-200 dark:border-neutral-800 flex items-center justify-between">
+        <div>
+          <h2 className="text-sm font-semibold tracking-wide text-black dark:text-white">
+            Storage
+          </h2>
+          <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-500">
+            Choose where your notes are stored.
+          </p>
         </div>
 
-        <div className="p-5 space-y-4">
-          {error && (
-            <div className="p-3 bg-neutral-100 dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-700 rounded-lg text-xs text-neutral-800 dark:text-neutral-200 flex items-start space-x-2">
-              <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
-              <span>{error}</span>
-            </div>
-          )}
+        <button
+          type="button"
+          onClick={onClose}
+          className="p-1 text-neutral-400 hover:text-black dark:hover:text-white transition-colors"
+          title="Close"
+        >
+          <X className="w-4 h-4" />
+        </button>
+      </div>
 
-          {/* Option 1: Native Local Directory */}
-          <div
-            className={`p-4 rounded-xl border transition-all ${
-              currentMode === 'filesystem'
-                ? 'bg-neutral-100/80 dark:bg-neutral-900 border-black dark:border-white shadow-2xs'
-                : 'bg-neutral-50 dark:bg-neutral-950 border-neutral-200 dark:border-neutral-800'
-            }`}
-          >
-            <div className="flex items-start justify-between">
-              <div className="flex items-start space-x-3">
-                <FolderOpen className="w-5 h-5 text-neutral-900 dark:text-neutral-100 shrink-0 mt-0.5" />
-                <div>
-                  <h3 className="text-sm font-semibold text-neutral-900 dark:text-neutral-100 flex items-center space-x-2">
-                    <span>Local Disk Directory</span>
-                    {currentMode === 'filesystem' && (
-                      <span className="px-2 py-0.5 bg-black text-white dark:bg-white dark:text-black text-[10px] rounded font-mono font-medium">
-                        Active
-                      </span>
-                    )}
+      {/* Body */}
+      <div className="px-5">
+
+        {/* Error */}
+        {error && (
+          <div className="py-3 border-b border-neutral-200 dark:border-neutral-800 flex items-start gap-2 text-xs text-neutral-700 dark:text-neutral-300">
+            <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+            <span>{error}</span>
+          </div>
+        )}
+
+        {/* Local filesystem */}
+        <div className="py-5 border-b border-neutral-200 dark:border-neutral-800">
+          <div className="flex items-start justify-between gap-6">
+            <div className="flex items-start gap-3 min-w-0">
+              <FolderOpen className="w-4 h-4 mt-0.5 shrink-0 text-black dark:text-white" />
+
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <h3 className="text-sm font-medium text-black dark:text-white">
+                    Local files
                   </h3>
-                  <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-0.5">
-                    Saves notes directly as standard <code className="font-mono text-neutral-900 dark:text-neutral-100">.md</code> files on your computer.
-                  </p>
-                  {currentMode === 'filesystem' && directoryName && (
-                    <p className="text-xs font-mono font-medium text-neutral-800 dark:text-neutral-200 mt-2">
-                      Folder: {directoryName}
-                    </p>
+
+                  {currentMode === 'filesystem' && (
+                    <span className="text-[10px] tracking-wide uppercase text-neutral-500 dark:text-neutral-500">
+                      Current
+                    </span>
                   )}
                 </div>
+
+                <p className="mt-1 text-xs leading-relaxed text-neutral-500 dark:text-neutral-500 max-w-md">
+                  Store notes directly on your computer as standard{' '}
+                  <code className="text-neutral-700 dark:text-neutral-300">
+                    .md
+                  </code>{' '}
+                  files.
+                </p>
+
+                {currentMode === 'filesystem' && directoryName && (
+                  <p className="mt-2 text-xs text-black dark:text-white truncate">
+                    {directoryName}
+                  </p>
+                )}
               </div>
             </div>
 
-            <div className="mt-3 pt-3 border-t border-neutral-200 dark:border-neutral-800 flex items-center justify-between">
-              {fsSupported ? (
-                <button
-                  onClick={handleChooseDirectory}
-                  disabled={loading}
-                  className="py-1.5 px-3 bg-black hover:bg-neutral-800 dark:bg-white dark:text-black dark:hover:bg-neutral-200 text-white rounded-lg text-xs font-medium flex items-center space-x-1.5 transition-colors shadow-2xs"
-                >
-                  <FolderOpen className="w-3.5 h-3.5" />
-                  <span>{directoryName ? 'Change Directory' : 'Select Directory'}</span>
-                </button>
-              ) : (
-                <div className="text-[11px] text-neutral-500 flex items-center space-x-1">
-                  <Info className="w-3.5 h-3.5" />
-                  <span>File System API restricted in this browser frame.</span>
-                </div>
-              )}
-            </div>
+            {fsSupported && (
+              <button
+                type="button"
+                onClick={handleChooseDirectory}
+                disabled={loading}
+                className="shrink-0 text-xs font-medium text-black dark:text-white underline underline-offset-4 decoration-neutral-300 dark:decoration-neutral-700 hover:decoration-black dark:hover:decoration-white disabled:opacity-40 transition-colors"
+              >
+                {loading
+                  ? 'Selecting…'
+                  : directoryName
+                    ? 'Change'
+                    : 'Choose'}
+              </button>
+            )}
           </div>
 
-          {/* Option 2: IndexedDB Browser Storage */}
-          <div
-            className={`p-4 rounded-xl border transition-all ${
-              currentMode === 'indexeddb'
-                ? 'bg-neutral-100/80 dark:bg-neutral-900 border-black dark:border-white shadow-2xs'
-                : 'bg-neutral-50 dark:bg-neutral-950 border-neutral-200 dark:border-neutral-800'
-            }`}
-          >
-            <div className="flex items-start justify-between">
-              <div className="flex items-start space-x-3">
-                <Database className="w-5 h-5 text-neutral-900 dark:text-neutral-100 shrink-0 mt-0.5" />
-                <div>
-                  <h3 className="text-sm font-semibold text-neutral-900 dark:text-neutral-100 flex items-center space-x-2">
-                    <span>Browser Storage (IndexedDB)</span>
-                    {currentMode === 'indexeddb' && (
-                      <span className="px-2 py-0.5 bg-black text-white dark:bg-white dark:text-black text-[10px] rounded font-mono font-medium">
-                        Active
-                      </span>
-                    )}
+          {!fsSupported && (
+            <div className="mt-3 ml-7 flex items-start gap-2 text-[11px] text-neutral-500 dark:text-neutral-500">
+              <Info className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+              <span>
+                File system access isn't available in this browser.
+              </span>
+            </div>
+          )}
+        </div>
+
+        {/* IndexedDB */}
+        <div className="py-5">
+          <div className="flex items-start justify-between gap-6">
+            <div className="flex items-start gap-3 min-w-0">
+              <Database className="w-4 h-4 mt-0.5 shrink-0 text-black dark:text-white" />
+
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <h3 className="text-sm font-medium text-black dark:text-white">
+                    Browser storage
                   </h3>
-                  <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-0.5">
-                    Fast client-side browser database storage.
-                  </p>
+
+                  {currentMode === 'indexeddb' && (
+                    <span className="text-[10px] tracking-wide uppercase text-neutral-500 dark:text-neutral-500">
+                      Current
+                    </span>
+                  )}
                 </div>
+
+                <p className="mt-1 text-xs leading-relaxed text-neutral-500 dark:text-neutral-500 max-w-md">
+                  Store notes locally in the browser using IndexedDB.
+                </p>
               </div>
             </div>
 
             {currentMode !== 'indexeddb' && (
-              <div className="mt-3 pt-3 border-t border-neutral-200 dark:border-neutral-800">
-                <button
-                  onClick={() => {
-                    onSwitchToIndexedDB();
-                    onClose();
-                  }}
-                  className="py-1.5 px-3 bg-neutral-200 dark:bg-neutral-800 hover:bg-neutral-300 dark:hover:bg-neutral-700 text-neutral-900 dark:text-neutral-100 rounded-lg text-xs font-medium transition-colors"
-                >
-                  Switch to IndexedDB
-                </button>
-              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  onSwitchToIndexedDB();
+                  onClose();
+                }}
+                className="shrink-0 text-xs font-medium text-black dark:text-white underline underline-offset-4 decoration-neutral-300 dark:decoration-neutral-700 hover:decoration-black dark:hover:decoration-white transition-colors"
+              >
+                Switch
+              </button>
             )}
           </div>
         </div>
 
-        <div className="p-3 bg-neutral-50 dark:bg-black border-t border-neutral-200 dark:border-neutral-800 text-right">
-          <button
-            onClick={onClose}
-            className="px-4 py-1.5 bg-black text-white dark:bg-white dark:text-black text-xs font-semibold rounded-lg hover:bg-neutral-800 dark:hover:bg-neutral-200 transition-colors"
-          >
-            Close
-          </button>
-        </div>
       </div>
     </div>
-  );
+  </div>
+);
 };
