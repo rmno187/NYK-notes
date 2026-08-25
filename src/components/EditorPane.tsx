@@ -15,24 +15,12 @@ import {
   Table,
   Minus,
   Tag as TagIcon,
-  Plus,
   X,
   Pin,
-  Trash2,
-  RotateCcw,
+
   Undo,
   Redo,
   ArrowLeft,
-  Moon,
-  Sun,
-  HardDrive,
-  Database,
-  Key,
-  Download,
-  HelpCircle,
-  ChevronRight,
-  Settings,
-  FileText,
 } from 'lucide-react';
 import { Note, EditorMode, StorageMode, Theme } from '../types';
 import { modSymbol } from '../lib/platform';
@@ -65,6 +53,7 @@ interface EditorPaneProps {
   storageMode?: StorageMode;
   directoryName?: string;
   onOpenDirectoryModal?: () => void;
+  onOpenSyncModal?: () => void;
   onOpenBackupModal?: () => void;
   onOpenImportModal?: () => void;
   onOpenShortcutsModal?: () => void;
@@ -93,6 +82,7 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
   storageMode,
   directoryName,
   onOpenDirectoryModal,
+  onOpenSyncModal,
   onOpenBackupModal,
   onOpenImportModal,
   onOpenShortcutsModal,
@@ -2226,9 +2216,31 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
             </span>
 
             <span className="text-xs text-neutral-400 dark:text-neutral-600 max-w-[150px] truncate">
-              {storageMode === 'filesystem' && directoryName
+              {storageMode === 'vercel'
+                ? 'Vercel · Sync'
+                : storageMode === 'filesystem' && directoryName
                 ? directoryName
                 : 'Browser'}
+            </span>
+          </button>
+        )}
+
+        {/* Sync Settings (if in Vercel mode or openable) */}
+        {onOpenSyncModal && (
+          <button
+            type="button"
+            onClick={() => {
+              onOpenSyncModal();
+              setIsSlideoutOpen(false);
+            }}
+            className="group flex items-center justify-between py-2.5 text-left"
+          >
+            <span className="text-sm text-black dark:text-white group-hover:underline underline-offset-4">
+              End-to-End Sync
+            </span>
+
+            <span className="text-xs text-neutral-400 dark:text-neutral-600">
+              E2EE / Devices
             </span>
           </button>
         )}

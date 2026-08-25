@@ -15,7 +15,38 @@ export interface Note {
   featured?: boolean;
 }
 
-export type StorageMode = 'filesystem' | 'indexeddb';
+export type StorageMode = 'filesystem' | 'indexeddb' | 'vercel';
+
+export type SyncStatus = 'synced' | 'syncing' | 'offline' | 'error' | 'unconfigured';
+
+export interface VercelSyncConfig {
+  accountId: string;
+  authSalt: string;      // Base64 salt used for PBKDF2
+  deviceId: string;
+  deviceName: string;
+  lastSyncedAt: number;
+  syncIntervalMs?: number;
+  autoSync?: boolean;
+}
+
+export interface EncryptedNoteEnvelope {
+  noteId: string;
+  version: number;
+  ciphertext: string;    // Base64 encoded AES-256-GCM ciphertext + tag
+  iv: string;            // Base64 encoded 12-byte IV
+  updatedAt: number;
+  deleted: boolean;
+}
+
+export interface SyncPushPayload {
+  changes: EncryptedNoteEnvelope[];
+  deviceId: string;
+}
+
+export interface SyncPullResponse {
+  notes: EncryptedNoteEnvelope[];
+  serverTimestamp: number;
+}
 
 export type Theme = 'light' | 'dark' | 'system';
 

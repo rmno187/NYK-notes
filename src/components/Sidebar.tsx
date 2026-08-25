@@ -10,9 +10,10 @@ import {
   CheckSquare,
   ChevronDown,
 } from 'lucide-react';
-import { Note } from '../types';
+import { Note, StorageMode } from '../types';
 import { NotePreview } from './NotePreview';
 import { modKey } from '../lib/platform';
+import { SyncStatusIndicator } from './SyncStatusIndicator';
 
 interface SidebarProps {
   notes: Note[];
@@ -32,6 +33,8 @@ interface SidebarProps {
   searchQuery: string;
   onSearchChange: (q: string) => void;
   onOpenSettingsModal?: () => void;
+  storageMode?: StorageMode;
+  onOpenSyncModal?: () => void;
   className?: string;
 }
 
@@ -46,6 +49,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onBatchRestore,
   searchQuery,
   onSearchChange,
+  storageMode,
+  onOpenSyncModal,
   className = '',
 }) => {
   const [activeTab, setActiveTab] = useState<'notes' | 'blog' | 'trash'>('notes');
@@ -489,7 +494,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </button>
           </div>
 
-          {/* ROW 2: SEARCH BAR + SETTINGS BUTTON */}
+          {/* ROW 2: SEARCH BAR + SETTINGS BUTTON / SYNC STATUS */}
           <div className="flex items-center gap-2 min-w-0">
             <div className="relative flex-1 min-w-[90px]">
               <Search className="w-3.5 h-3.5 absolute left-1 top-1/2 -translate-y-1/2 text-neutral-400 pointer-events-none" />
@@ -537,6 +542,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 </button>
               )}
             </div>
+
+            {/* Sync status indicator if Vercel Sync is active or configured */}
+            {storageMode === 'vercel' && onOpenSyncModal && (
+              <div className="shrink-0">
+                <SyncStatusIndicator onOpenSyncModal={onOpenSyncModal} />
+              </div>
+            )}
           </div>
         </div>
       )}

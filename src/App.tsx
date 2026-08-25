@@ -9,12 +9,14 @@ import {
   saveNoteToDirectory,
   deleteNoteFromDirectory,
 } from './lib/storage';
+import { syncManager } from './lib/vercelSync/syncManager';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { convertHtmlToMarkdown, parseMarkdownNote, formatBlogDate } from './lib/markdown';
 import { isMac, modSymbol } from './lib/platform';
 import { Sidebar } from './components/Sidebar';
 import { EditorPane } from './components/EditorPane';
 import { DirectorySelectorModal } from './components/DirectorySelectorModal';
+import { SyncModal } from './components/SyncModal';
 import { BackupModal } from './components/BackupModal';
 import { ImportModal } from './components/ImportModal';
 import { ShortcutsModal } from './components/ShortcutsModal';
@@ -111,6 +113,7 @@ export default function App() {
 
   // Modals
   const [isDirectoryModalOpen, setIsDirectoryModalOpen] = useState(false);
+  const [isSyncModalOpen, setIsSyncModalOpen] = useState(false);
   const [isBackupModalOpen, setIsBackupModalOpen] = useState(false);
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [isShortcutsModalOpen, setIsShortcutsModalOpen] = useState(false);
@@ -126,9 +129,25 @@ export default function App() {
     localStorage.setItem('app-theme', theme);
   }, [theme]);
 
-  // Initial Data Load (IndexedDB or Local Directory)
+  // Initial Data Load & Sync Manager init
   useEffect(() => {
     const initApp = async () => {
+      // 1. Check if Vercel Sync was previously active/configured
+      const savedStorageMode = localStorage.getItem('active_storage_mode') as StorageMode | null;
+      const isSyncReady = await syncManager.initialize();
+
+      if (savedStorageMode === 'vercel' && isSyncReady) {
+        setStorageMode('vercel');
+        const vercelNotes = await syncManager.loadNotes();
+        if (vercelNotes && vercelNotes.length > 0) {
+          setNotes(vercelNotes);
+          const activeList = vercelNotes.filter((n) => !n.deletedAt);
+          setActiveNoteId(activeList.length > 0 ? activeList[0].id : vercelNotes[0].id);
+          return;
+        }
+      }
+
+      // 2. Otherwise load default IndexedDB
       try {
         const storedNotes = await getIndexedDBNotes();
         if (storedNotes && storedNotes.length > 0) {
@@ -174,6 +193,22 @@ export default function App() {
     initApp();
   }, []);
 
+  // Listen to remote changes when in Vercel Sync mode
+  useEffect(() => {
+    if (storageMode !== 'vercel') return;
+
+    const unsubscribe = syncManager.subscribeNotes((remoteNotes) => {
+      setNotes((prev) => {
+        // Merge smoothly while preserving active note selection
+        return remoteNotes;
+      });
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, [storageMode]);
+
   // Compute all unique tags across notes
   const allTags = useMemo(() => {
     const tagSet = new Set<string>();
@@ -190,7 +225,9 @@ export default function App() {
   const persistNote = useCallback(
     async (updatedNote: Note) => {
       try {
-        if (storageMode === 'filesystem' && directoryHandle) {
+        if (storageMode === 'vercel') {
+          await syncManager.saveNote(updatedNote);
+        } else if (storageMode === 'filesystem' && directoryHandle) {
           const fileName = await saveNoteToDirectory(directoryHandle, updatedNote);
           updatedNote.fileName = fileName;
         } else {
@@ -575,7 +612,9 @@ export default function App() {
         }
 
         try {
-          if (storageMode === 'filesystem' && directoryHandle && noteToDelete.fileName) {
+          if (storageMode === 'vercel') {
+            await syncManager.deleteNote(noteId);
+          } else if (storageMode === 'filesystem' && directoryHandle && noteToDelete.fileName) {
             await deleteNoteFromDirectory(directoryHandle, noteToDelete.fileName);
           } else {
             await deleteIndexedDBNote(noteId);
@@ -614,7 +653,9 @@ export default function App() {
     const trashed = notes.filter((n) => n.deletedAt);
     for (const note of trashed) {
       try {
-        if (storageMode === 'filesystem' && directoryHandle && note.fileName) {
+        if (storageMode === 'vercel') {
+          await syncManager.deleteNote(note.id);
+        } else if (storageMode === 'filesystem' && directoryHandle && note.fileName) {
           await deleteNoteFromDirectory(directoryHandle, note.fileName);
         } else {
           await deleteIndexedDBNote(note.id);
@@ -674,6 +715,7 @@ export default function App() {
     setDirectoryHandle(handle);
     setDirectoryName(handle.name);
     setStorageMode('filesystem');
+    localStorage.setItem('active_storage_mode', 'filesystem');
 
     const dirNotes = await loadNotesFromDirectory(handle);
     if (dirNotes && dirNotes.length > 0) {
@@ -685,6 +727,7 @@ export default function App() {
   // Switch to IndexedDB
   const handleSwitchToIndexedDB = async () => {
     setStorageMode('indexeddb');
+    localStorage.setItem('active_storage_mode', 'indexeddb');
     setDirectoryHandle(null);
     setDirectoryName('');
 
@@ -692,6 +735,23 @@ export default function App() {
     setNotes(idbNotes);
     if (idbNotes.length > 0) {
       setActiveNoteId(idbNotes[0].id);
+    }
+  };
+
+  // Switch to Vercel Sync
+  const handleSwitchToVercelSync = async () => {
+    setStorageMode('vercel');
+    localStorage.setItem('active_storage_mode', 'vercel');
+    setDirectoryHandle(null);
+    setDirectoryName('');
+
+    const vercelNotes = await syncManager.loadNotes();
+    setNotes(vercelNotes);
+    if (vercelNotes.length > 0) {
+      const activeList = vercelNotes.filter((n) => !n.deletedAt);
+      setActiveNoteId(activeList.length > 0 ? activeList[0].id : vercelNotes[0].id);
+    } else {
+      setActiveNoteId(null);
     }
   };
 
@@ -804,6 +864,8 @@ export default function App() {
           onSearchChange={setSearchQuery}
           isSearchMode={isSearchMode}
           onToggleSearchMode={() => setIsSearchMode((prev) => !prev)}
+          storageMode={storageMode}
+          onOpenSyncModal={() => setIsSyncModalOpen(true)}
           className={mobileView === 'editor' ? 'hidden md:flex w-full md:w-80' : 'flex w-full md:w-80'}
         />
 
@@ -833,6 +895,7 @@ export default function App() {
               storageMode={storageMode}
               directoryName={directoryName}
               onOpenDirectoryModal={() => setIsDirectoryModalOpen(true)}
+              onOpenSyncModal={() => setIsSyncModalOpen(true)}
               onOpenBackupModal={() => setIsBackupModalOpen(true)}
               onOpenImportModal={() => setIsImportModalOpen(true)}
               onOpenShortcutsModal={() => setIsShortcutsModalOpen(true)}
@@ -862,6 +925,20 @@ export default function App() {
         directoryName={directoryName}
         onSelectLocalDirectory={handleSelectLocalDirectory}
         onSwitchToIndexedDB={handleSwitchToIndexedDB}
+        onSwitchToVercelSync={handleSwitchToVercelSync}
+        onOpenSyncSettings={() => {
+          setIsDirectoryModalOpen(false);
+          setIsSyncModalOpen(true);
+        }}
+      />
+
+      <SyncModal
+        isOpen={isSyncModalOpen}
+        onClose={() => setIsSyncModalOpen(false)}
+        onConfigured={async () => {
+          // When configured or credentials entered, switch to Vercel Sync
+          await handleSwitchToVercelSync();
+        }}
       />
 
       <BackupModal

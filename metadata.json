@@ -1,6 +1,6 @@
 {
   "name": "Offline Markdown Notes",
-  "description": "A privacy-first offline markdown editor with encryption, local file storage, keyboard navigation, and tag organization.",
+  "description": "A privacy-first markdown editor with end-to-end encrypted Vercel synchronization, local file system storage, and zero-knowledge client encryption.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }
