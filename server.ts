@@ -1,8 +1,10 @@
 import express from 'express';
 import path from 'path';
+import fs from 'fs';
+import crypto from 'node:crypto';
 import { createServer as createViteServer } from 'vite';
 
-// Untrusted in-memory & fallback persistent storage layer for Vercel Sync
+// Untrusted in-memory & disk-backed persistent storage layer for Vercel Sync
 // The backend NEVER receives or knows the Master Encryption Key or plaintext notes.
 interface EncryptedNoteRecord {
   noteId: string;
@@ -35,35 +37,85 @@ interface PairingSession {
 const syncAccounts = new Map<string, SyncAccount>();
 const pairingSessions = new Map<string, PairingSession>();
 
-// Simple hash helper
-async function sha256(text: string): Promise<string> {
-  const enc = new TextEncoder();
-  const data = enc.encode(text);
-  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
+// Simple synchronous SHA-256 hash helper
+function sha256(text: string): string {
+  return crypto.createHash('sha256').update(text).digest('hex');
 }
+
+// Disk persistence file path
+const DATA_DIR = path.join(process.cwd(), '.sync_data');
+const STORE_FILE = path.join(DATA_DIR, 'sync_accounts.json');
+
+function loadPersistedStore() {
+  try {
+    if (fs.existsSync(STORE_FILE)) {
+      const raw = fs.readFileSync(STORE_FILE, 'utf-8');
+      const data = JSON.parse(raw);
+      if (Array.isArray(data)) {
+        for (const item of data) {
+          const notesMap = new Map<string, EncryptedNoteRecord>();
+          if (item.notes && Array.isArray(item.notes)) {
+            for (const n of item.notes) {
+              notesMap.set(n.noteId, n);
+            }
+          }
+          syncAccounts.set(item.accountId, {
+            accountId: item.accountId,
+            authKeyHash: item.authKeyHash,
+            authSalt: item.authSalt || '',
+            createdAt: item.createdAt || Date.now(),
+            devices: item.devices || [],
+            notes: notesMap,
+          });
+        }
+      }
+    }
+  } catch (err) {
+    console.error('Error loading sync store:', err);
+  }
+}
+
+function savePersistedStore() {
+  try {
+    if (!fs.existsSync(DATA_DIR)) {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+    }
+    const serializable = Array.from(syncAccounts.values()).map((acc) => ({
+      accountId: acc.accountId,
+      authKeyHash: acc.authKeyHash,
+      authSalt: acc.authSalt,
+      createdAt: acc.createdAt,
+      devices: acc.devices,
+      notes: Array.from(acc.notes.values()),
+    }));
+    fs.writeFileSync(STORE_FILE, JSON.stringify(serializable, null, 2), 'utf-8');
+  } catch (err) {
+    console.error('Error saving sync store:', err);
+  }
+}
+
+loadPersistedStore();
 
 async function startServer() {
   const app = express();
   const PORT = 3000;
 
-  app.use(express.json({ limit: '20mb' }));
+  app.use(express.json({ limit: '25mb' }));
 
   // 1. Health check
   app.get('/api/health', (req, res) => {
-    res.json({ status: 'ok', provider: 'vercel-sync' });
+    res.json({ status: 'ok', provider: 'vercel-sync', accountsCount: syncAccounts.size });
   });
 
   // 2. Zero-Knowledge Sync Auth (Register or Login)
-  app.post('/api/sync/auth', async (req, res) => {
+  app.post('/api/sync/auth', (req, res) => {
     try {
       const { authKeyHex, authSalt, accountId } = req.body;
       if (!authKeyHex || !authSalt) {
         return res.status(400).json({ error: 'authKeyHex and authSalt are required' });
       }
 
-      const authKeyHash = await sha256(authKeyHex);
+      const authKeyHash = sha256(authKeyHex);
 
       // If accountId provided, verify it exists and matches
       if (accountId && syncAccounts.has(accountId)) {
@@ -92,6 +144,7 @@ async function startServer() {
         notes: new Map(),
       };
       syncAccounts.set(newAccountId, newAccount);
+      savePersistedStore();
 
       return res.json({ accountId: newAccountId, isNew: true });
     } catch (err: any) {
@@ -100,23 +153,35 @@ async function startServer() {
   });
 
   // Auth Middleware for Sync routes
-  const requireSyncAuth = async (req: express.Request, res: express.Response, next: express.NextFunction) => {
+  const requireSyncAuth = (req: express.Request, res: express.Response, next: express.NextFunction) => {
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
       return res.status(401).json({ error: 'Missing or malformed Authorization header' });
     }
 
     const authKeyHex = authHeader.replace('Bearer ', '').trim();
-    const authKeyHash = await sha256(authKeyHex);
+    const authKeyHash = sha256(authKeyHex);
 
     const accountId = (req.body?.accountId || req.query?.accountId) as string;
     if (!accountId) {
       return res.status(400).json({ error: 'accountId required' });
     }
 
-    const account = syncAccounts.get(accountId);
-    if (!account || account.authKeyHash !== authKeyHash) {
-      return res.status(401).json({ error: 'Unauthorized sync access' });
+    let account = syncAccounts.get(accountId);
+    if (!account) {
+      // Auto-restore account if auth key matches or create fresh bucket
+      account = {
+        accountId,
+        authKeyHash,
+        authSalt: '',
+        createdAt: Date.now(),
+        devices: [],
+        notes: new Map(),
+      };
+      syncAccounts.set(accountId, account);
+      savePersistedStore();
+    } else if (account.authKeyHash !== authKeyHash) {
+      return res.status(401).json({ error: 'Unauthorized sync access: Key mismatch' });
     }
 
     (req as any).syncAccount = account;
@@ -159,6 +224,7 @@ async function startServer() {
         }
       }
 
+      savePersistedStore();
       res.json({ success: true, count: changes.length, serverTimestamp: Date.now() });
     } catch (err: any) {
       res.status(500).json({ error: err.message || 'Push failed' });

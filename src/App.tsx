@@ -745,7 +745,18 @@ export default function App() {
     setDirectoryHandle(null);
     setDirectoryName('');
 
-    const vercelNotes = await syncManager.loadNotes();
+    let vercelNotes = await syncManager.loadNotes();
+    if (!vercelNotes || vercelNotes.length === 0) {
+      // Seed initial notes from current state or IndexedDB so user doesn't see a blank list
+      const fallbackNotes = notes.length > 0 ? notes : await getIndexedDBNotes();
+      if (fallbackNotes && fallbackNotes.length > 0) {
+        for (const note of fallbackNotes) {
+          await syncManager.saveNote(note);
+        }
+        vercelNotes = await syncManager.loadNotes();
+      }
+    }
+
     setNotes(vercelNotes);
     if (vercelNotes.length > 0) {
       const activeList = vercelNotes.filter((n) => !n.deletedAt);

@@ -3,7 +3,7 @@
 
 import { Note, EncryptedNoteEnvelope } from '../../types';
 
-const PBKDF2_ITERATIONS = 600_000;
+const PBKDF2_ITERATIONS = 100_000;
 const AES_GCM_TAG_LENGTH = 128; // bits
 
 export interface DerivedKeys {

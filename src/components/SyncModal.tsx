@@ -21,14 +21,20 @@ import { VercelSyncConfig, SyncStatus } from '../types';
 interface SyncModalProps {
   isOpen: boolean;
   onClose: () => void;
+  onConfigured?: () => void;
   onSyncConfigured?: () => void;
 }
 
 export const SyncModal: React.FC<SyncModalProps> = ({
   isOpen,
   onClose,
+  onConfigured,
   onSyncConfigured,
 }) => {
+  const notifyConfigured = () => {
+    if (onConfigured) onConfigured();
+    if (onSyncConfigured) onSyncConfigured();
+  };
   const [activeTab, setActiveTab] = useState<'status' | 'setup' | 'pair' | 'recovery' | 'security'>('status');
   const [status, setStatus] = useState<SyncStatus>(syncManager.getStatus());
   const [config, setConfig] = useState<VercelSyncConfig | null>(syncManager.getConfig());
@@ -76,7 +82,7 @@ export const SyncModal: React.FC<SyncModalProps> = ({
       const phraseToUse = generatedPhrase || generateRecoveryPhrase(12);
       await syncManager.setupWithPassphrase(phraseToUse);
       setActiveTab('recovery');
-      if (onSyncConfigured) onSyncConfigured();
+      notifyConfigured();
     } catch (err: any) {
       setErrorMessage(err.message || 'Failed to initialize encrypted sync');
     } finally {
@@ -94,7 +100,7 @@ export const SyncModal: React.FC<SyncModalProps> = ({
     try {
       await syncManager.setupWithPassphrase(passphraseInput.trim());
       setActiveTab('status');
-      if (onSyncConfigured) onSyncConfigured();
+      notifyConfigured();
     } catch (err: any) {
       setErrorMessage(err.message || 'Failed to connect to sync account');
     } finally {
@@ -177,7 +183,7 @@ export const SyncModal: React.FC<SyncModalProps> = ({
       setTimeout(() => {
         setPairingSuccess(false);
         setActiveTab('status');
-        if (onSyncConfigured) onSyncConfigured();
+        notifyConfigured();
       }, 1500);
     } catch (err: any) {
       setErrorMessage(err.message || 'Device pairing failed');
