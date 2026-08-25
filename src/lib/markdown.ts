@@ -65,7 +65,9 @@ export function formatBlogDate(timestamp: number = Date.now()): string {
 export function convertHtmlToMarkdown(html: string): string {
   if (!html) return '';
   try {
-    return turndown.turndown(html);
+    // Un-nest <p> tags inside <li> to prevent unwanted list indentation artifacts
+    const cleanedHtml = html.replace(/<li([^>]*)>\s*<p>(.*?)<\/p>\s*<\/li>/gis, '<li$1>$2</li>');
+    return turndown.turndown(cleanedHtml);
   } catch (err) {
     console.error('Turndown error:', err);
     return html;

@@ -501,23 +501,7 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
         // Convert incoming HTML to clean markdown to strip all inline colors, styles, classes, and fonts
         const markdown = convertHtmlToMarkdown(rawHtml);
         if (markdown && markdown.trim()) {
-          htmlToInsert = renderMarkdownToHtml(markdown);
-
-          // If it's a single inline element/text without newlines and was wrapped in a single <p>...</p>,
-          // unwrap the outer <p> tag so it inserts inline at the current cursor position seamlessly
-          const trimmedMd = markdown.trim();
-          if (
-            !trimmedMd.includes('\n') &&
-            !trimmedMd.startsWith('#') &&
-            !trimmedMd.startsWith('- ') &&
-            !trimmedMd.startsWith('* ') &&
-            !trimmedMd.startsWith('1. ') &&
-            !trimmedMd.startsWith('> ') &&
-            htmlToInsert.startsWith('<p>') &&
-            htmlToInsert.endsWith('</p>')
-          ) {
-            htmlToInsert = htmlToInsert.slice(3, -4);
-          }
+          htmlToInsert = renderMarkdownToHtml(markdown).trim();
         }
       }
 
@@ -538,12 +522,58 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
         }
       }
 
+      // Detect cursor context (inside LI, heading, paragraph, etc.)
+      const sel = window.getSelection();
+      let isInsideList = false;
+      let isInsideHeading = false;
+      if (sel && sel.anchorNode && wysiwygRef.current) {
+        let n: Node | null = sel.anchorNode;
+        if (n.nodeType === Node.TEXT_NODE) n = n.parentNode;
+        while (n && n !== wysiwygRef.current) {
+          const tag = (n as HTMLElement).tagName?.toUpperCase();
+          if (tag === 'LI') isInsideList = true;
+          if (['H1', 'H2', 'H3', 'H4', 'H5', 'H6'].includes(tag)) isInsideHeading = true;
+          n = n.parentNode;
+        }
+      }
+
+      // Check if htmlToInsert is wrapped in a single <p>...</p> block
+      const trimmedHtml = htmlToInsert.trim();
+      const isSingleParagraph =
+        trimmedHtml.startsWith('<p>') &&
+        trimmedHtml.endsWith('</p>') &&
+        trimmedHtml.indexOf('<p>', 3) === -1 &&
+        !trimmedHtml.includes('<ul>') &&
+        !trimmedHtml.includes('<ol>') &&
+        !trimmedHtml.includes('<h1>') &&
+        !trimmedHtml.includes('<h2>') &&
+        !trimmedHtml.includes('<h3>') &&
+        !trimmedHtml.includes('<blockquote>') &&
+        !trimmedHtml.includes('<pre>');
+
+      if (isSingleParagraph || isInsideList || isInsideHeading) {
+        if (isSingleParagraph) {
+          htmlToInsert = trimmedHtml.slice(3, -4);
+        } else if (isInsideList) {
+          // In a list item, don't insert raw block <p> containers
+          htmlToInsert = htmlToInsert
+            .replace(/<p><br><\/p>/gi, '<br>')
+            .replace(/<p>/gi, '')
+            .replace(/<\/p>/gi, '<br>')
+            .replace(/<br>$/, '');
+        } else if (isInsideHeading) {
+          // In a heading, strip block tags
+          htmlToInsert = htmlToInsert
+            .replace(/<\/?(?:p|div|h[1-6]|ul|ol|li|blockquote|pre)[^>]*>/gi, ' ')
+            .trim();
+        }
+      }
+
       if (htmlToInsert) {
         // Use document.execCommand first to preserve undo stack and native cursor behavior
         const success = document.execCommand('insertHTML', false, htmlToInsert);
         if (!success) {
           // Range fallback
-          const sel = window.getSelection();
           if (sel && sel.rangeCount > 0) {
             const range = sel.getRangeAt(0);
             range.deleteContents();
@@ -972,24 +1002,23 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
       const { blockNode } = info;
       const tag = blockNode.tagName.toUpperCase();
 
-      // Check if inside task item
-      const isTaskItem =
-        tag === 'LI' &&
-        (blockNode.classList.contains('task-list-item') ||
-          blockNode.querySelector('input[type="checkbox"]') !== null ||
-          blockNode.closest('ul.contains-task-list') !== null);
+      // List Item (Bullet, Numbered, or Task)
+      if (tag === 'LI') {
+        e.preventDefault();
 
-      if (isTaskItem) {
+        const isTaskItem =
+          blockNode.classList.contains('task-list-item') ||
+          blockNode.querySelector('input[type="checkbox"]') !== null ||
+          blockNode.closest('ul.contains-task-list') !== null;
+
         // Clone node and strip checkbox to check text
         const clone = blockNode.cloneNode(true) as HTMLElement;
-        const checkbox = clone.querySelector('input[type="checkbox"]');
-        if (checkbox) checkbox.remove();
+        clone.querySelectorAll('input[type="checkbox"]').forEach((cb) => cb.remove());
         const textContent = clone.textContent?.replace(/[\r\n\s\u200B-\u200D\uFEFF]/g, '') || '';
 
         if (textContent === '') {
-          // Exit task list mode on Enter on empty tickbox
-          e.preventDefault();
-          const parentList = blockNode.closest('ul');
+          // Exit list mode when pressing Enter on an empty list item
+          const parentList = blockNode.closest('ul, ol');
           blockNode.remove();
 
           const p = document.createElement('p');
@@ -1008,23 +1037,69 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
             wysiwygRef.current.appendChild(p);
           }
 
-          const range = document.createRange();
-          range.selectNodeContents(p);
-          range.collapse(true);
+          const targetRange = document.createRange();
+          targetRange.selectNodeContents(p);
+          targetRange.collapse(true);
           const sel = window.getSelection();
           if (sel) {
             sel.removeAllRanges();
-            sel.addRange(range);
+            sel.addRange(targetRange);
           }
           handleWysiwygInput();
           checkActiveFormats();
           return;
-        } else {
-          // Create new tickbox on Enter
-          e.preventDefault();
-          const newLi = document.createElement('li');
+        }
+
+        // Non-empty list item: split or insert new list item at exact cursor position
+        const sel = window.getSelection();
+        if (!sel || sel.rangeCount === 0) return;
+        const range = sel.getRangeAt(0);
+
+        const preRange = document.createRange();
+        preRange.selectNodeContents(blockNode);
+        preRange.setEnd(range.startContainer, range.startOffset);
+        const beforeFrag = preRange.cloneContents();
+
+        const postRange = document.createRange();
+        postRange.selectNodeContents(blockNode);
+        postRange.setStart(range.endContainer, range.endOffset);
+        const afterFrag = postRange.cloneContents();
+
+        const beforeTemp = document.createElement('div');
+        beforeTemp.appendChild(beforeFrag.cloneNode(true));
+        beforeTemp.querySelectorAll('input[type="checkbox"]').forEach((c) => c.remove());
+        const beforeText = beforeTemp.textContent?.replace(/[\r\n\s\u200B-\u200D\uFEFF]/g, '') || '';
+
+        const afterTemp = document.createElement('div');
+        afterTemp.appendChild(afterFrag.cloneNode(true));
+        afterTemp.querySelectorAll('input[type="checkbox"]').forEach((c) => c.remove());
+        const afterText = afterTemp.textContent?.replace(/[\r\n\s\u200B-\u200D\uFEFF]/g, '') || '';
+
+        const newLi = document.createElement('li');
+        if (isTaskItem) {
           newLi.className = 'task-list-item';
-          newLi.innerHTML = '<input type="checkbox" />&nbsp;';
+        }
+
+        if (beforeText === '') {
+          // Cursor at start of list item: insert empty item before current item
+          if (isTaskItem) {
+            newLi.innerHTML = '<input type="checkbox" />&nbsp;';
+          } else {
+            newLi.innerHTML = '<br>';
+          }
+          blockNode.parentNode?.insertBefore(newLi, blockNode);
+          handleWysiwygInput();
+          checkActiveFormats();
+          return;
+        }
+
+        if (afterText === '') {
+          // Cursor at end of list item: insert new item immediately after current item
+          if (isTaskItem) {
+            newLi.innerHTML = '<input type="checkbox" />&nbsp;';
+          } else {
+            newLi.innerHTML = '<br>';
+          }
 
           if (blockNode.nextSibling) {
             blockNode.parentNode?.insertBefore(newLi, blockNode.nextSibling);
@@ -1032,50 +1107,115 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
             blockNode.parentNode?.appendChild(newLi);
           }
 
-          const range = document.createRange();
-          range.selectNodeContents(newLi);
-          range.collapse(false);
-          const sel = window.getSelection();
-          if (sel) {
-            sel.removeAllRanges();
-            sel.addRange(range);
-          }
+          const targetRange = document.createRange();
+          targetRange.selectNodeContents(newLi);
+          targetRange.collapse(false);
+          sel.removeAllRanges();
+          sel.addRange(targetRange);
           handleWysiwygInput();
           checkActiveFormats();
           return;
         }
-      }
 
-      // Standard List Item (bullet or number)
-      if (tag === 'LI') {
-        const text = blockNode.textContent?.replace(/[\r\n\s\u200B-\u200D\uFEFF]/g, '') || '';
-        if (text === '') {
-          e.preventDefault();
-          const parentList = blockNode.closest('ul, ol');
-          blockNode.remove();
-          if (parentList && parentList.children.length === 0) {
-            parentList.remove();
-          }
-          document.execCommand('insertHTML', false, '<p><br></p>');
-          handleWysiwygInput();
-          checkActiveFormats();
-          return;
+        // Cursor in middle: cleanly split content between current item and new item
+        blockNode.innerHTML = '';
+        if (isTaskItem) {
+          const keepCb = document.createElement('input');
+          keepCb.type = 'checkbox';
+          const origCb = (blockNode as HTMLElement).querySelector('input[type="checkbox"]') as HTMLInputElement;
+          if (origCb && origCb.checked) keepCb.checked = true;
+          blockNode.appendChild(keepCb);
+          blockNode.appendChild(document.createTextNode(' '));
         }
+        const beforeNodes = Array.from(beforeFrag.childNodes).filter(
+          (n) => !(n.nodeType === Node.ELEMENT_NODE && (n as HTMLElement).tagName === 'INPUT')
+        );
+        beforeNodes.forEach((node) => blockNode.appendChild(node));
+        if (!blockNode.textContent?.trim() && !isTaskItem) {
+          blockNode.innerHTML = '<br>';
+        }
+
+        if (isTaskItem) {
+          const newCb = document.createElement('input');
+          newCb.type = 'checkbox';
+          newLi.appendChild(newCb);
+          newLi.appendChild(document.createTextNode(' '));
+        }
+        const afterNodes = Array.from(afterFrag.childNodes).filter(
+          (n) => !(n.nodeType === Node.ELEMENT_NODE && (n as HTMLElement).tagName === 'INPUT')
+        );
+        afterNodes.forEach((node) => newLi.appendChild(node));
+        if (!newLi.textContent?.trim() && !isTaskItem) {
+          newLi.appendChild(document.createElement('br'));
+        }
+
+        if (blockNode.nextSibling) {
+          blockNode.parentNode?.insertBefore(newLi, blockNode.nextSibling);
+        } else {
+          blockNode.parentNode?.appendChild(newLi);
+        }
+
+        const targetRange = document.createRange();
+        if (isTaskItem && newLi.childNodes.length > 2) {
+          targetRange.setStart(newLi.childNodes[2], 0);
+        } else {
+          targetRange.selectNodeContents(newLi);
+          targetRange.collapse(true);
+        }
+        sel.removeAllRanges();
+        sel.addRange(targetRange);
+        handleWysiwygInput();
+        checkActiveFormats();
+        return;
       }
 
       // Heading: Enter converts new line to <p> so user isn't stuck in heading style
       if (tag === 'H1' || tag === 'H2' || tag === 'H3') {
-        setTimeout(() => {
-          const currentSel = window.getSelection();
-          if (currentSel && currentSel.anchorNode) {
-            let curr: Node | null = currentSel.anchorNode;
-            if (curr.nodeType === Node.TEXT_NODE) curr = curr.parentNode;
-            if (curr && (curr as HTMLElement).tagName?.toUpperCase() === tag) {
-              document.execCommand('formatBlock', false, '<p>');
-              checkActiveFormats();
-            }
+        const sel = window.getSelection();
+        if (sel && sel.rangeCount > 0) {
+          const range = sel.getRangeAt(0);
+          const text = blockNode.textContent?.replace(/[\r\n\s\u200B-\u200D\uFEFF]/g, '') || '';
+
+          if (text === '') {
+            e.preventDefault();
+            const p = document.createElement('p');
+            p.innerHTML = '<br>';
+            blockNode.parentNode?.replaceChild(p, blockNode);
+            const r = document.createRange();
+            r.selectNodeContents(p);
+            r.collapse(true);
+            sel.removeAllRanges();
+            sel.addRange(r);
+            handleWysiwygInput();
+            checkActiveFormats();
+            return;
           }
-        }, 0);
+
+          const postRange = document.createRange();
+          postRange.selectNodeContents(blockNode);
+          postRange.setStart(range.endContainer, range.endOffset);
+          const afterText = postRange.toString().replace(/[\r\n\s\u200B-\u200D\uFEFF]/g, '');
+
+          if (afterText === '') {
+            // Cursor at end of heading: create new paragraph after heading
+            e.preventDefault();
+            const p = document.createElement('p');
+            p.innerHTML = '<br>';
+            if (blockNode.nextSibling) {
+              blockNode.parentNode?.insertBefore(p, blockNode.nextSibling);
+            } else {
+              blockNode.parentNode?.appendChild(p);
+            }
+            const r = document.createRange();
+            r.selectNodeContents(p);
+            r.collapse(true);
+            sel.removeAllRanges();
+            sel.addRange(r);
+            handleWysiwygInput();
+            checkActiveFormats();
+            return;
+          }
+        }
       }
 
       // Blockquote: Enter on empty line inside blockquote escapes quote

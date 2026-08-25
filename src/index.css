@@ -126,6 +126,11 @@ html, body, #root {
   margin-bottom: 0.25rem;
 }
 
+.editor-wysiwyg li p {
+  margin: 0;
+  display: inline;
+}
+
 .editor-wysiwyg blockquote {
   border-left: 3px solid currentColor;
   padding-left: 1rem;
