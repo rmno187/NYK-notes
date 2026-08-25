@@ -19,7 +19,8 @@ interface SidebarProps {
   activeNoteId: string | null;
   onSelectNote: (id: string) => void;
   onNewNote: (
-    initialParams?: string | { title?: string; content?: string }
+    initialParams?: string | { title?: string; content?: string },
+    type?: 'note' | 'post'
   ) => void;
   onDeleteNote: (id: string, e?: React.MouseEvent) => void;
   onRestoreNote: (id: string, e?: React.MouseEvent) => void;
@@ -47,7 +48,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onSearchChange,
   className = '',
 }) => {
-  const [activeTab, setActiveTab] = useState<'notes' | 'trash'>('notes');
+  const [activeTab, setActiveTab] = useState<'notes' | 'blog' | 'trash'>('notes');
   const [isFolderDropdownOpen, setIsFolderDropdownOpen] = useState(false);
   const [selectedNoteIds, setSelectedNoteIds] = useState<string[]>([]);
 
@@ -82,11 +83,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
     };
   }, []);
 
-  const activeNotes = notes.filter((n) => !n.deletedAt);
+  const activeNotes = notes.filter((n) => !n.deletedAt && n.type !== 'post');
+  const blogNotes = notes.filter((n) => !n.deletedAt && n.type === 'post');
   const trashedNotes = notes.filter((n) => Boolean(n.deletedAt));
 
   const currentNotesList =
-    activeTab === 'notes' ? activeNotes : trashedNotes;
+    activeTab === 'notes'
+      ? activeNotes
+      : activeTab === 'blog'
+      ? blogNotes
+      : trashedNotes;
 
   // --------------------------------------------------
   // Search
@@ -99,6 +105,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
       !searchQuery ||
       note.title.toLowerCase().includes(query) ||
       note.content.toLowerCase().includes(query) ||
+      (note.description && note.description.toLowerCase().includes(query)) ||
+      (note.author && note.author.toLowerCase().includes(query)) ||
       note.tags.some((t) => t.toLowerCase().includes(query))
     );
   });
@@ -108,7 +116,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   // --------------------------------------------------
 
   const sortedNotes = [...filteredNotes].sort((a, b) => {
-    if (activeTab === 'notes') {
+    if (activeTab === 'notes' || activeTab === 'blog') {
       if (a.pinned && !b.pinned) return -1;
       if (!a.pinned && b.pinned) return 1;
 
@@ -277,7 +285,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               </span>
             </button>
 
-            {activeTab === 'notes' ? (
+            {activeTab === 'notes' || activeTab === 'blog' ? (
               <>
                 {/* PIN */}
                 <button
@@ -313,7 +321,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     setSelectedNoteIds([]);
                   }}
                   className="p-1.5 bg-red-600/90 hover:bg-red-600 text-white rounded transition-colors flex items-center space-x-1 text-xs"
-                  title="Delete Selected Notes"
+                  title={activeTab === 'blog' ? 'Delete Selected Posts' : 'Delete Selected Notes'}
                 >
                   <Trash2 className="w-3.5 h-3.5" />
 
@@ -386,6 +394,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 <span className="truncate font-sans font-bold text-xs">
                   {activeTab === 'notes'
                     ? `Notes (${activeNotes.length})`
+                    : activeTab === 'blog'
+                    ? `Blog (${blogNotes.length})`
                     : `Trash (${trashedNotes.length})`}
                 </span>
 
@@ -420,6 +430,27 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     </span>
                   </button>
 
+                  {/* BLOG */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveTab('blog');
+                      setIsFolderDropdownOpen(false);
+                    }}
+                    className={`w-full px-3 py-2 text-left flex items-center justify-between hover:bg-neutral-100 dark:hover:bg-neutral-800/80 transition-colors ${
+                      activeTab === 'blog'
+                        ? 'font-bold text-neutral-900 dark:text-neutral-100 bg-neutral-50 dark:bg-neutral-800/40'
+                        : 'text-neutral-600 dark:text-neutral-400'
+                    }`}
+                  >
+                    <div className="flex items-center space-x-2">
+                      <span>Blog</span>
+                    </div>
+                    <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-neutral-100 dark:bg-neutral-800">
+                      {blogNotes.length}
+                    </span>
+                  </button>
+
                   {/* TRASH */}
                   <button
                     type="button"
@@ -444,16 +475,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
               )}
             </div>
 
-            {/* NEW NOTE BUTTON ON SAME ROW */}
+            {/* NEW NOTE / POST BUTTON ON SAME ROW */}
             <button
               type="button"
-              onClick={() => onNewNote()}
+              onClick={() => onNewNote(undefined, activeTab === 'blog' ? 'post' : 'note')}
               className="flex items-center gap-1.5 px-2 py-1 text-xs font-sans font-semibold tracking-wide text-neutral-700 dark:text-neutral-300 hover:text-black dark:hover:text-white transition-colors"
-              title={`Create New Note (${modKey}+N)`}
+              title={activeTab === 'blog' ? `Create New Post (${modKey}+N)` : `Create New Note (${modKey}+N)`}
             >
               <Plus className="w-3.5 h-3.5" />
               <span className="underline underline-offset-4 decoration-neutral-300 dark:decoration-neutral-700 hover:decoration-current">
-                New note
+                {activeTab === 'blog' ? 'New post' : 'New note'}
               </span>
             </button>
           </div>
@@ -556,7 +587,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
                 <p className="text-xs font-medium text-neutral-500 dark:text-neutral-400">
                   {searchQuery
-                    ? 'No matching notes found'
+                    ? activeTab === 'blog'
+                      ? 'No matching posts found'
+                      : 'No matching notes found'
+                    : activeTab === 'blog'
+                    ? 'No blog posts yet'
                     : 'No notes yet'}
                 </p>
               </>
@@ -578,7 +613,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               ? note.title.trim()
               : '';
 
-            const formattedDate = new Date(
+            const formattedDate = note.date || new Date(
               note.updatedAt || note.createdAt
             ).toLocaleDateString(undefined, {
               month: 'short',
@@ -624,7 +659,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     ) : (
                       <div className="mt-1 text-sm flex-1 min-w-0">
                         <NotePreview
-                          content={note.content}
+                          content={note.description || note.content}
                         />
                       </div>
                     )}
@@ -632,7 +667,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     {/* PIN */}
 
                     {note.pinned &&
-                      activeTab === 'notes' && (
+                      (activeTab === 'notes' || activeTab === 'blog') && (
                         <Pin className="w-3 h-3 text-current fill-current shrink-0 ml-1" />
                       )}
                   </div>
@@ -641,46 +676,70 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
                   {noteTitle && (
                     <div className="mt-1 text-sm">
-                      <NotePreview
-                        content={note.content}
-                      />
+                      {note.description ? (
+                        <p className="text-xs text-neutral-500 dark:text-neutral-400 line-clamp-2 italic">
+                          {note.description}
+                        </p>
+                      ) : (
+                        <NotePreview
+                          content={note.content}
+                        />
+                      )}
                     </div>
                   )}
 
                   {/* FOOTER */}
 
-                  {activeTab === 'notes' && (
+                  {(activeTab === 'notes' || activeTab === 'blog') && (
                     <div className="flex items-center justify-between mt-2 pt-1.5 border-t border-neutral-100 dark:border-neutral-800/80">
-                      <span className="text-xs text-neutral-400 dark:text-neutral-500 font-mono">
-                        {formattedDate}
-                      </span>
+                      <div className="flex items-center space-x-2 truncate">
+                        <span className="text-xs text-neutral-400 dark:text-neutral-500 font-mono shrink-0">
+                          {formattedDate}
+                        </span>
 
-                        {note.tags.length > 0 && (
-                          <div className="flex items-center space-x-1 overflow-hidden max-w-[160px]">
-                            {note.tags
-                              .slice(0, 3)
-                              .map((t) => (
-                                <button
-                                  key={t}
-                                  type="button"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    onSearchChange(t);
-                                  }}
-                                  className={`text-xs font-mono px-1.5 py-0.5 rounded-md truncate border transition-colors ${
-                                    isSelected
-                                      ? 'bg-white/10 text-current border-white/20 hover:bg-white/20 dark:bg-black/10 dark:border-black/20'
-                                      : 'bg-neutral-100 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300 border-neutral-200/60 dark:border-neutral-700/60 hover:bg-neutral-200 dark:hover:bg-neutral-700'
-                                  }`}
-                                  title={`Search for #${t}`}
-                                >
-                                  {t}
-                                </button>
-                              ))}
-                          </div>
+                        {note.featured && (
+                          <span className={`text-[10px] font-mono uppercase px-1 py-0.2 border transition-colors ${
+                            isSelected
+                              ? 'border-white/30 text-white dark:border-black/30 dark:text-black'
+                              : 'border-neutral-300 dark:border-neutral-700 text-neutral-700 dark:text-neutral-300'
+                          }`}>
+                            Featured
+                          </span>
+                        )}
+
+                        {note.author && (
+                          <span className="text-xs text-neutral-400 dark:text-neutral-500 truncate max-w-[80px]">
+                            {note.author}
+                          </span>
                         )}
                       </div>
-                    )}
+
+                      {note.tags.length > 0 && (
+                        <div className="flex items-center space-x-1 overflow-hidden max-w-[140px]">
+                          {note.tags
+                            .slice(0, 3)
+                            .map((t) => (
+                              <button
+                                key={t}
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  onSearchChange(t);
+                                }}
+                                className={`text-xs font-mono px-1.5 py-0.5 rounded-md truncate border transition-colors ${
+                                  isSelected
+                                    ? 'bg-white/10 text-current border-white/20 hover:bg-white/20 dark:bg-black/10 dark:border-black/20'
+                                    : 'bg-neutral-100 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300 border-neutral-200/60 dark:border-neutral-700/60 hover:bg-neutral-200 dark:hover:bg-neutral-700'
+                                }`}
+                                title={`Search for #${t}`}
+                              >
+                                {t}
+                              </button>
+                            ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
             );

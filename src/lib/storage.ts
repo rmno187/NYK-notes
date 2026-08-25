@@ -175,6 +175,11 @@ export async function loadNotesFromDirectory(dirHandle: FileSystemDirectoryHandl
           createdAt: file.lastModified,
           updatedAt: file.lastModified,
           fileName: entry.name,
+          type: parsed.type,
+          date: parsed.date,
+          description: parsed.description,
+          author: parsed.author,
+          featured: parsed.featured,
         });
       } catch (e) {
         console.error(`Error reading file ${entry.name}:`, e);
@@ -201,7 +206,7 @@ export async function saveNoteToDirectory(dirHandle: FileSystemDirectoryHandle, 
     fileName = `${safeTitle || 'note'}-${Date.now().toString(36)}.md`;
   }
 
-  const serializedContent = serializeNoteToMarkdown(note.title, note.tags, !!note.pinned, note.content);
+  const serializedContent = serializeNoteToMarkdown(note);
 
   const fileHandle = await dirHandle.getFileHandle(fileName, { create: true });
   const writable = await fileHandle.createWritable();

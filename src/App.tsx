@@ -10,7 +10,7 @@ import {
   deleteNoteFromDirectory,
 } from './lib/storage';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
-import { convertHtmlToMarkdown, parseMarkdownNote } from './lib/markdown';
+import { convertHtmlToMarkdown, parseMarkdownNote, formatBlogDate } from './lib/markdown';
 import { isMac, modSymbol } from './lib/platform';
 import { Sidebar } from './components/Sidebar';
 import { EditorPane } from './components/EditorPane';
@@ -241,6 +241,87 @@ export default function App() {
     [activeNoteId, persistNote]
   );
 
+  // Update Note Description (Blog mode)
+  const handleDescriptionChange = useCallback(
+    (newDescription: string) => {
+      if (!activeNoteId) return;
+
+      setNotes((prev) =>
+        prev.map((note) => {
+          if (note.id === activeNoteId) {
+            const updated = { ...note, description: newDescription, updatedAt: Date.now() };
+            persistNote(updated);
+            return updated;
+          }
+          return note;
+        })
+      );
+    },
+    [activeNoteId, persistNote]
+  );
+
+  // Update Note Author (Blog mode)
+  const handleAuthorChange = useCallback(
+    (newAuthor: string) => {
+      if (!activeNoteId) return;
+
+      setNotes((prev) =>
+        prev.map((note) => {
+          if (note.id === activeNoteId) {
+            const updated = { ...note, author: newAuthor, updatedAt: Date.now() };
+            persistNote(updated);
+            return updated;
+          }
+          return note;
+        })
+      );
+    },
+    [activeNoteId, persistNote]
+  );
+
+  // Toggle Featured (Blog mode)
+  const handleToggleFeatured = useCallback(() => {
+    if (!activeNoteId) return;
+
+    setNotes((prev) =>
+      prev.map((note) => {
+        if (note.id === activeNoteId) {
+          const updated = { ...note, featured: !note.featured, updatedAt: Date.now() };
+          persistNote(updated);
+          return updated;
+        }
+        return note;
+      })
+    );
+  }, [activeNoteId, persistNote]);
+
+  // Update Note Type (Convert between Note and Blog post)
+  const handleTypeChange = useCallback(
+    (newType: 'note' | 'post') => {
+      if (!activeNoteId) return;
+
+      setNotes((prev) =>
+        prev.map((note) => {
+          if (note.id === activeNoteId) {
+            const updated: Note = {
+              ...note,
+              type: newType,
+              date: note.date || (newType === 'post' ? formatBlogDate(note.createdAt) : undefined),
+              description: note.description || (newType === 'post' ? '' : undefined),
+              author: note.author || (newType === 'post' ? '' : undefined),
+              featured: note.featured !== undefined ? note.featured : (newType === 'post' ? false : undefined),
+              updatedAt: Date.now(),
+            };
+            persistNote(updated);
+            return updated;
+          }
+          return note;
+        })
+      );
+    },
+    [activeNoteId, persistNote]
+  );
+
   // Toggle Pinned
   const handleTogglePin = useCallback(
     (noteId?: string, e?: React.MouseEvent) => {
@@ -313,9 +394,12 @@ export default function App() {
     setMobileView('list');
   }, [activeNoteId, checkAndDeleteEmptyNote]);
 
-  // Create New Note
+  // Create New Note or Blog Post
   const handleNewNote = useCallback(
-    (initialParams?: string | { title?: string; content?: string }) => {
+    (
+      initialParams?: string | { title?: string; content?: string },
+      noteType?: 'note' | 'post'
+    ) => {
       let title = '';
       let content = '';
 
@@ -326,6 +410,8 @@ export default function App() {
         content = initialParams.content || '';
       }
 
+      const isBlog = noteType === 'post';
+
       const newNote: Note = {
         id: `note-${Date.now().toString(36)}`,
         title: title,
@@ -334,6 +420,11 @@ export default function App() {
         createdAt: Date.now(),
         updatedAt: Date.now(),
         pinned: false,
+        type: isBlog ? 'post' : 'note',
+        date: isBlog ? formatBlogDate() : undefined,
+        description: isBlog ? '' : undefined,
+        author: isBlog ? '' : undefined,
+        featured: isBlog ? false : undefined,
       };
 
       setNotes((prev) => {
@@ -620,6 +711,11 @@ export default function App() {
         content: parsed.content,
         tags: parsed.tags,
         pinned: parsed.pinned,
+        type: parsed.type,
+        date: parsed.date,
+        description: parsed.description,
+        author: parsed.author,
+        featured: parsed.featured,
         createdAt: file.lastModified || Date.now(),
         updatedAt: file.lastModified || Date.now(),
         fileName: file.name,
@@ -722,6 +818,10 @@ export default function App() {
               onBackToList={handleBackToList}
               onChangeTitle={handleTitleChange}
               onChangeContent={handleContentChange}
+              onChangeDescription={handleDescriptionChange}
+              onChangeAuthor={handleAuthorChange}
+              onToggleFeatured={handleToggleFeatured}
+              onChangeType={handleTypeChange}
               onTogglePin={() => handleTogglePin(activeNote.id)}
               onDeleteNote={() => handleDeleteNote(activeNote.id)}
               onRestoreNote={() => handleRestoreNote(activeNote.id)}

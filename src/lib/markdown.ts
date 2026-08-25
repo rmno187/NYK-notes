@@ -1,5 +1,6 @@
 import { Marked } from 'marked';
 import TurndownService from 'turndown';
+import { Note } from '../types';
 
 const marked = new Marked({
   gfm: true,
@@ -48,6 +49,17 @@ turndown.addRule('tables', {
 });
 
 /**
+ * Formats timestamp to standard blog post date string e.g. "August 25, 2026"
+ */
+export function formatBlogDate(timestamp: number = Date.now()): string {
+  return new Date(timestamp).toLocaleDateString('en-US', {
+    month: 'long',
+    day: 'numeric',
+    year: 'numeric',
+  });
+}
+
+/**
  * Converts HTML string back to Markdown
  */
 export function convertHtmlToMarkdown(html: string): string {
@@ -75,19 +87,18 @@ function parseTagsValue(value: string): string[] {
 
 /**
  * Parses frontmatter metadata from markdown string
- * e.g.
- * ---
- * title: ""
- * tags: []
- * pinned: false
- * ---
- * Content goes here...
+ * Supports both standard notes and blog posts
  */
 export function parseMarkdownNote(rawContent: string, defaultFileName?: string) {
   let title = '';
   let hasExplicitTitle = false;
   let tags: string[] = [];
   let pinned = false;
+  let type: 'note' | 'post' | undefined = undefined;
+  let date: string | undefined = undefined;
+  let description: string | undefined = undefined;
+  let author: string | undefined = undefined;
+  let featured: boolean | undefined = undefined;
   let content = (rawContent || '').replace(/^\uFEFF/, ''); // Strip UTF-8 BOM if present
 
   // 1. Check for YAML Frontmatter delimited by --- or +++
@@ -111,15 +122,26 @@ export function parseMarkdownNote(rawContent: string, defaultFileName?: string) 
           pinned = value.toLowerCase() === 'true';
         } else if (key === 'tags') {
           tags = parseTagsValue(value);
+        } else if (key === 'date') {
+          date = value.replace(/^['"]|['"]$/g, '');
+        } else if (key === 'description' || key === 'subtitle' || key === 'summary') {
+          description = value.replace(/^['"]|['"]$/g, '');
+        } else if (key === 'author') {
+          author = value.replace(/^['"]|['"]$/g, '');
+        } else if (key === 'featured') {
+          featured = value.toLowerCase() === 'true';
+        } else if (key === 'type') {
+          const cleanType = value.replace(/^['"]|['"]$/g, '').trim().toLowerCase();
+          if (cleanType === 'post' || cleanType === 'blog') {
+            type = 'post';
+          } else {
+            type = 'note';
+          }
         }
       }
     });
   } else {
     // 2. Check if file starts with undelimited YAML/metadata headers at top
-    // e.g.:
-    // title: ""
-    // tags: []
-    // pinned: false
     const lines = content.split('\n');
     let headerLineCount = 0;
     let foundHeaders = false;
@@ -137,7 +159,7 @@ export function parseMarkdownNote(rawContent: string, defaultFileName?: string) 
       if (colonIdx !== -1) {
         const key = line.slice(0, colonIdx).trim().toLowerCase();
         const value = line.slice(colonIdx + 1).trim();
-        if (['title', 'tags', 'pinned', 'created', 'updated', 'date', 'id'].includes(key)) {
+        if (['title', 'tags', 'pinned', 'created', 'updated', 'date', 'id', 'description', 'subtitle', 'author', 'featured', 'type'].includes(key)) {
           foundHeaders = true;
           headerLineCount = i + 1;
           if (key === 'title') {
@@ -147,6 +169,21 @@ export function parseMarkdownNote(rawContent: string, defaultFileName?: string) 
             pinned = value.toLowerCase() === 'true';
           } else if (key === 'tags') {
             tags = parseTagsValue(value);
+          } else if (key === 'date') {
+            date = value.replace(/^['"]|['"]$/g, '');
+          } else if (key === 'description' || key === 'subtitle' || key === 'summary') {
+            description = value.replace(/^['"]|['"]$/g, '');
+          } else if (key === 'author') {
+            author = value.replace(/^['"]|['"]$/g, '');
+          } else if (key === 'featured') {
+            featured = value.toLowerCase() === 'true';
+          } else if (key === 'type') {
+            const cleanType = value.replace(/^['"]|['"]$/g, '').trim().toLowerCase();
+            if (cleanType === 'post' || cleanType === 'blog') {
+              type = 'post';
+            } else {
+              type = 'note';
+            }
           }
           continue;
         }
@@ -177,6 +214,11 @@ export function parseMarkdownNote(rawContent: string, defaultFileName?: string) 
     }
   }
 
+  // Auto-detect post type if post-specific metadata exists
+  if (!type && (description !== undefined || author !== undefined || featured !== undefined)) {
+    type = 'post';
+  }
+
   // Clean legacy raw HTML content strings if necessary
   if (content.trim().startsWith('<p>') && content.includes('</p>')) {
     content = convertHtmlToMarkdown(content);
@@ -191,13 +233,58 @@ export function parseMarkdownNote(rawContent: string, defaultFileName?: string) 
     tags: combinedTags,
     pinned,
     content,
+    type,
+    date,
+    description,
+    author,
+    featured,
   };
 }
 
 /**
  * Serialize note into Markdown with clean YAML Frontmatter
  */
-export function serializeNoteToMarkdown(title: string, tags: string[], pinned: boolean, content: string): string {
+export function serializeNoteToMarkdown(
+  noteOrTitle: Note | string,
+  tagsArg?: string[],
+  pinnedArg?: boolean,
+  contentArg?: string
+): string {
+  if (typeof noteOrTitle === 'object' && noteOrTitle !== null) {
+    const note = noteOrTitle;
+    if (note.type === 'post') {
+      const dateStr = note.date || formatBlogDate(note.createdAt || Date.now());
+      const lines = [
+        '---',
+        `title: "${(note.title || '').replace(/"/g, '\\"')}"`,
+        `date: "${dateStr.replace(/"/g, '\\"')}"`,
+        `description: "${(note.description || '').replace(/"/g, '\\"')}"`,
+        `author: "${(note.author || '').replace(/"/g, '\\"')}"`,
+        `tags: [${(note.tags || []).map((t) => `"${t}"`).join(', ')}]`,
+        `featured: ${Boolean(note.featured)}`,
+        `type: post`,
+        '---',
+        '',
+      ];
+      return lines.join('\n') + (note.content || '');
+    }
+
+    const lines = [
+      '---',
+      `title: "${(note.title || '').replace(/"/g, '\\"')}"`,
+      `tags: [${(note.tags || []).map((t) => `"${t}"`).join(', ')}]`,
+      `pinned: ${Boolean(note.pinned)}`,
+      '---',
+      '',
+    ];
+    return lines.join('\n') + (note.content || '');
+  }
+
+  const title = typeof noteOrTitle === 'string' ? noteOrTitle : '';
+  const tags = tagsArg || [];
+  const pinned = Boolean(pinnedArg);
+  const content = contentArg || '';
+
   const frontmatterLines = [
     '---',
     `title: "${title.replace(/"/g, '\\"')}"`,
@@ -238,10 +325,14 @@ export function renderMarkdownToHtml(markdownContent: string): string {
   }
   try {
     const rawHtml = marked.parse(cleanMarkdown) as string;
-    // Remove disabled attribute from checkbox inputs so they can be clicked/toggled
+    // 1. Remove disabled attribute from checkbox inputs so they can be clicked/toggled
+    // 2. Strip inline style attributes from raw tags to prevent dark mode color issues
+    // 3. Strip deprecated <font> tags
     return rawHtml
       .replace(/<input([^>]*)\sdisabled=""([^>]*)>/gi, '<input$1$2>')
-      .replace(/<input([^>]*)\sdisabled([^>]*)>/gi, '<input$1$2>');
+      .replace(/<input([^>]*)\sdisabled([^>]*)>/gi, '<input$1$2>')
+      .replace(/<\/?font[^>]*>/gi, '')
+      .replace(/\sstyle="[^"]*"/gi, '');
   } catch (err) {
     return `<p class="text-red-500">Error rendering Markdown</p>`;
   }

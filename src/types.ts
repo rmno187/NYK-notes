@@ -8,6 +8,11 @@ export interface Note {
   pinned?: boolean;
   fileName?: string; // name of file on disk if using File System Access API
   deletedAt?: number; // timestamp when soft-deleted to trash
+  type?: 'note' | 'post';
+  date?: string; // e.g. "August 25, 2026"
+  description?: string; // Subtitle / summary
+  author?: string;
+  featured?: boolean;
 }
 
 export type StorageMode = 'filesystem' | 'indexeddb';

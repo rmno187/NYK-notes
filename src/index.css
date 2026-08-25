@@ -28,6 +28,17 @@ html, body, #root {
 .editor-wysiwyg {
   line-height: 1.7;
   font-size: 0.95rem;
+  color: inherit;
+}
+
+/* Force theme inheritance for all pasted or nested text containers */
+.editor-wysiwyg :where(p, span, div, li, ul, ol, h1, h2, h3, h4, h5, h6, blockquote, b, strong, i, em, u, s, font) {
+  color: inherit !important;
+}
+
+/* Strip any unwanted hardcoded background colors from pasted inline elements */
+.editor-wysiwyg :where(p, span, div, li, ul, ol, h1, h2, h3, h4, h5, h6, blockquote, b, strong, i, em, u, s, font):not(pre):not(code):not(th):not(input) {
+  background-color: transparent !important;
 }
 
 .editor-wysiwyg h1 {

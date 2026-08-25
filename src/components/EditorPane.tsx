@@ -53,6 +53,12 @@ interface EditorPaneProps {
   onChangeEditorMode?: (mode: EditorMode) => void;
   onToggleEditorMode?: () => void;
   onBackToList?: () => void;
+  // Blog Post Fields
+  onChangeDescription?: (description: string) => void;
+  onChangeAuthor?: (author: string) => void;
+  onToggleFeatured?: () => void;
+  onChangeType?: (type: 'note' | 'post') => void;
+  onChangeDate?: (date: string) => void;
   // App Options & Settings
   theme?: Theme;
   onToggleTheme?: () => void;
@@ -78,6 +84,10 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
   onChangeEditorMode,
   onToggleEditorMode,
   onBackToList,
+  onChangeDescription,
+  onChangeAuthor,
+  onToggleFeatured,
+  onChangeType,
   theme,
   onToggleTheme,
   storageMode,
@@ -472,6 +482,91 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
       document.removeEventListener('selectionchange', handleSelectionChange);
     };
   }, [mode, checkActiveFormats]);
+
+  // Handle Paste in WYSIWYG editor to sanitize rich text, remove inline color/background styling,
+  // and ensure seamless rendering in both light and dark mode.
+  const handleWysiwygPaste = useCallback(
+    (e: React.ClipboardEvent<HTMLDivElement>) => {
+      e.preventDefault();
+
+      const clipboardData = e.clipboardData;
+      if (!clipboardData) return;
+
+      const rawHtml = clipboardData.getData('text/html');
+      const plainText = clipboardData.getData('text/plain');
+
+      let htmlToInsert = '';
+
+      if (rawHtml) {
+        // Convert incoming HTML to clean markdown to strip all inline colors, styles, classes, and fonts
+        const markdown = convertHtmlToMarkdown(rawHtml);
+        if (markdown && markdown.trim()) {
+          htmlToInsert = renderMarkdownToHtml(markdown);
+
+          // If it's a single inline element/text without newlines and was wrapped in a single <p>...</p>,
+          // unwrap the outer <p> tag so it inserts inline at the current cursor position seamlessly
+          const trimmedMd = markdown.trim();
+          if (
+            !trimmedMd.includes('\n') &&
+            !trimmedMd.startsWith('#') &&
+            !trimmedMd.startsWith('- ') &&
+            !trimmedMd.startsWith('* ') &&
+            !trimmedMd.startsWith('1. ') &&
+            !trimmedMd.startsWith('> ') &&
+            htmlToInsert.startsWith('<p>') &&
+            htmlToInsert.endsWith('</p>')
+          ) {
+            htmlToInsert = htmlToInsert.slice(3, -4);
+          }
+        }
+      }
+
+      if (!htmlToInsert && plainText) {
+        // Escape HTML entities in plain text
+        const escaped = plainText
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;');
+
+        if (escaped.includes('\n')) {
+          const lines = escaped.split(/\r?\n/);
+          htmlToInsert = lines
+            .map((line) => (line.trim() ? `<p>${line}</p>` : '<p><br></p>'))
+            .join('');
+        } else {
+          htmlToInsert = escaped;
+        }
+      }
+
+      if (htmlToInsert) {
+        // Use document.execCommand first to preserve undo stack and native cursor behavior
+        const success = document.execCommand('insertHTML', false, htmlToInsert);
+        if (!success) {
+          // Range fallback
+          const sel = window.getSelection();
+          if (sel && sel.rangeCount > 0) {
+            const range = sel.getRangeAt(0);
+            range.deleteContents();
+            const template = document.createElement('template');
+            template.innerHTML = htmlToInsert;
+            const fragment = template.content;
+            const lastChild = fragment.lastChild;
+            range.insertNode(fragment);
+            if (lastChild) {
+              range.setStartAfter(lastChild);
+              range.collapse(true);
+              sel.removeAllRanges();
+              sel.addRange(range);
+            }
+          }
+        }
+      }
+
+      handleWysiwygInput();
+      checkActiveFormats();
+    },
+    [handleWysiwygInput, checkActiveFormats]
+  );
 
   // Unified WYSIWYG block formatting helper
   const applyWysiwygBlockFormat = (targetType: string) => {
@@ -1463,7 +1558,7 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
         <div className="mb-4 pb-2 border-b border-neutral-100 dark:border-neutral-900 shrink-0">
           <input
             type="text"
-            placeholder="Title"
+            placeholder={note.type === 'post' ? 'Post title' : 'Title'}
             value={note.title}
             onChange={(e) => onChangeTitle(e.target.value)}
             onKeyDown={(e) => {
@@ -1474,6 +1569,25 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
             }}
             className="w-full text-2xl sm:text-3xl font-extrabold bg-transparent text-neutral-900 dark:text-neutral-100 placeholder-neutral-300 dark:placeholder-neutral-700 focus:outline-none tracking-tight"
           />
+
+          {/* Subtitle / Description Field for Blog mode */}
+          {note.type === 'post' && (
+            <div className="mt-2.5">
+              <input
+                type="text"
+                placeholder="Brief summary or subtitle..."
+                value={note.description || ''}
+                onChange={(e) => onChangeDescription?.(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    focusContent();
+                  }
+                }}
+                className="w-full text-base italic bg-transparent text-neutral-600 dark:text-neutral-400 placeholder-neutral-400 dark:placeholder-neutral-600 focus:outline-none tracking-tight font-sans"
+              />
+            </div>
+          )}
         </div>
 
         {mode === 'wysiwyg' ? (
@@ -1484,6 +1598,7 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
             onInput={handleWysiwygInput}
             onClick={handleWysiwygClick}
             onKeyDown={handleWysiwygKeyDown}
+            onPaste={handleWysiwygPaste}
             className="editor-wysiwyg w-full min-h-[350px] outline-none text-neutral-900 dark:text-neutral-100"
           />
         ) : (
@@ -1732,15 +1847,74 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
 
 
     {/* ============================================================ */}
+    {/* AUTHOR (BLOG POST ONLY) */}
+    {/* ============================================================ */}
+    {note.type === 'post' && (
+      <section className="border-t border-neutral-200 dark:border-neutral-800 py-6">
+        <div className="flex items-center justify-between mb-3">
+          <span className="text-xs font-medium tracking-wide text-black dark:text-white">
+            Author
+          </span>
+        </div>
+        <input
+          type="text"
+          placeholder="Author name (optional)"
+          value={note.author || ''}
+          onChange={(e) => onChangeAuthor?.(e.target.value)}
+          className="w-full font-mono bg-transparent border-b border-neutral-300 dark:border-neutral-700 py-2 text-sm text-black dark:text-white placeholder-neutral-400 dark:placeholder-neutral-600 focus:outline-none focus:border-black dark:focus:border-white transition-colors"
+        />
+      </section>
+    )}
+
+    {/* ============================================================ */}
+    {/* FEATURED POST (BLOG POST ONLY) */}
+    {/* ============================================================ */}
+    {note.type === 'post' && (
+      <section className="border-t border-neutral-200 dark:border-neutral-800 py-6">
+        <div className="flex items-center justify-between">
+          <div>
+            <span className="text-xs font-medium tracking-wide text-black dark:text-white block">
+              Featured post
+            </span>
+            <span className="text-[11px] text-neutral-400 dark:text-neutral-600">
+              Highlight in blog list
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={onToggleFeatured}
+            className={`px-3 py-1 text-xs font-mono border transition-colors ${
+              note.featured
+                ? 'bg-black text-white border-black dark:bg-white dark:text-black dark:border-white'
+                : 'bg-transparent text-neutral-500 border-neutral-300 dark:border-neutral-700 hover:text-black dark:hover:text-white'
+            }`}
+          >
+            {note.featured ? 'Featured' : 'Standard'}
+          </button>
+        </div>
+      </section>
+    )}
+
+    {/* ============================================================ */}
     {/* NOTE ACTIONS */}
     {/* ============================================================ */}
 
     <section className="border-t border-neutral-200 dark:border-neutral-800 py-6">
 
-      <div className="mb-4">
+      <div className="mb-4 flex items-center justify-between">
         <span className="text-xs font-medium tracking-wide text-black dark:text-white">
-          Note
+          {note.type === 'post' ? 'Blog post' : 'Note'}
         </span>
+
+        {onChangeType && (
+          <button
+            type="button"
+            onClick={() => onChangeType(note.type === 'post' ? 'note' : 'post')}
+            className="text-[11px] text-neutral-400 hover:text-black dark:hover:text-white underline underline-offset-2 transition-colors"
+          >
+            {note.type === 'post' ? 'Convert to note' : 'Convert to blog post'}
+          </button>
+        )}
       </div>
 
       <div className="flex flex-col items-start gap-3">
@@ -1755,7 +1929,7 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
               }}
               className="text-sm text-black dark:text-white hover:underline underline-offset-4 transition-all"
             >
-              Restore note
+              Restore {note.type === 'post' ? 'post' : 'note'}
             </button>
           )
         ) : (
@@ -1790,6 +1964,22 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
       </div>
 
       <div className="space-y-2 text-xs">
+
+        {note.type === 'post' && (
+          <div className="flex justify-between gap-4">
+            <span className="text-neutral-500 dark:text-neutral-500">
+              Date
+            </span>
+
+            <span className="text-black dark:text-white text-right">
+              {note.date || new Date(note.createdAt).toLocaleDateString('en-US', {
+                month: 'long',
+                day: 'numeric',
+                year: 'numeric',
+              })}
+            </span>
+          </div>
+        )}
 
         <div className="flex justify-between gap-4">
           <span className="text-neutral-500 dark:text-neutral-500">
