@@ -1,26 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { createClient, SupabaseClient } from '@supabase/supabase-js';
-
-let supabaseClient: SupabaseClient | null = null;
-function getSupabase(): SupabaseClient | null {
-  if (supabaseClient) return supabaseClient;
-  const url =
-    process.env.SUPABASE_URL ||
-    process.env.NEXT_PUBLIC_SUPABASE_URL ||
-    process.env.VITE_SUPABASE_URL;
-  const key =
-    process.env.SUPABASE_SERVICE_ROLE_KEY ||
-    process.env.SUPABASE_ANON_KEY ||
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
-    process.env.VITE_SUPABASE_ANON_KEY;
-
-  if (url && key) {
-    supabaseClient = createClient(url, key, {
-      auth: { persistSession: false },
-    });
-  }
-  return supabaseClient;
-}
+import { getSupabase, getSupabaseConfig } from '../lib/supabase';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader('Access-Control-Allow-Credentials', 'true');
@@ -45,7 +24,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(401).json({ error: 'Missing or malformed Authorization header' });
     }
 
-    const { accountId, vaultId, changes, deviceId } = req.body || {};
+    const { accountId, vaultId, changes } = req.body || {};
     const targetVaultId = vaultId || accountId;
 
     if (!targetVaultId) {
@@ -58,9 +37,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const supabase = getSupabase();
     if (!supabase) {
+      const config = getSupabaseConfig();
       return res.status(500).json({
-        error: 'Supabase credentials not configured in Vercel environment variables (SUPABASE_URL / SUPABASE_ANON_KEY)',
+        error: `Supabase environment variables missing on Vercel. (SUPABASE_URL: ${
+          config.url ? 'found' : 'missing'
+        }, SUPABASE_ANON_KEY: ${config.key ? 'found' : 'missing'})`,
       });
+    }
+
+    if (changes.length === 0) {
+      return res.status(200).json({ success: true, count: 0 });
     }
 
     const supabaseRows = changes
@@ -82,18 +68,38 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
 
     if (supabaseRows.length > 0) {
-      const { error } = await supabase.from('notes').upsert(supabaseRows, {
+      // First attempt upsert with onConflict on (id, vault_id)
+      let { error } = await supabase.from('notes').upsert(supabaseRows, {
         onConflict: 'id,vault_id',
       });
 
-      if (error) {
-        // Fallback for single primary key 'id'
-        const { error: fallbackErr } = await supabase.from('notes').upsert(supabaseRows, {
+      // If composite key failed, try with single key 'id'
+      if (error && error.message.includes('onConflict')) {
+        const fallback = await supabase.from('notes').upsert(supabaseRows, {
           onConflict: 'id',
         });
-        if (fallbackErr) {
-          return res.status(500).json({ error: fallbackErr.message });
+        error = fallback.error;
+      }
+
+      if (error) {
+        console.error('Supabase push error:', error);
+        if (error.message.includes('row-level security') || error.code === '42501') {
+          return res.status(500).json({
+            error:
+              'Supabase Row Level Security (RLS) is blocking inserts. In your Supabase SQL editor, run: ALTER TABLE notes DISABLE ROW LEVEL SECURITY; or add an INSERT/UPDATE policy.',
+            code: 'RLS_VIOLATION',
+            detail: error.message,
+          });
         }
+        if (error.message.includes('relation "notes" does not exist') || error.code === '42P01') {
+          return res.status(500).json({
+            error:
+              'Supabase table "notes" does not exist. In your Supabase SQL Editor, run the CREATE TABLE statement.',
+            code: 'TABLE_NOT_FOUND',
+            detail: error.message,
+          });
+        }
+        return res.status(500).json({ error: error.message, code: error.code });
       }
     }
 
@@ -104,6 +110,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       persistedToSupabase: true,
     });
   } catch (err: any) {
+    console.error('Push error:', err);
     return res.status(500).json({ error: err.message || 'Push failed' });
   }
 }

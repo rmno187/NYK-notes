@@ -54,12 +54,15 @@ export const SyncModal: React.FC<SyncModalProps> = ({
   const [isConnectingPair, setIsConnectingPair] = useState(false);
   const [pairingSuccess, setPairingSuccess] = useState(false);
 
+  const [lastErrorMessage, setLastErrorMessage] = useState<string | null>(syncManager.getLastError());
+
   useEffect(() => {
     if (!isOpen) return;
 
-    const unsubscribe = syncManager.subscribeStatus((newStatus) => {
+    const unsubscribe = syncManager.subscribeStatus((newStatus, lastSyncedAt, errMsg) => {
       setStatus(newStatus);
       setConfig(syncManager.getConfig());
+      setLastErrorMessage(errMsg || syncManager.getLastError());
     });
 
     const isConfig = syncManager.isConfigured();
@@ -341,6 +344,45 @@ export const SyncModal: React.FC<SyncModalProps> = ({
                   Sync Now
                 </button>
               </div>
+
+              {/* Sync Error Diagnostic Alert */}
+              {status === 'error' && lastErrorMessage && (
+                <div className="p-3.5 rounded-lg border border-rose-200 dark:border-rose-900/60 bg-rose-50/50 dark:bg-rose-950/20 space-y-2">
+                  <div className="flex items-start gap-2 text-rose-800 dark:text-rose-200 font-semibold text-xs">
+                    <AlertTriangle className="w-4 h-4 text-rose-500 shrink-0 mt-0.5" />
+                    <span>Database Error Details</span>
+                  </div>
+                  <p className="text-xs text-rose-700 dark:text-rose-300 leading-relaxed font-mono text-[11px] bg-rose-100/50 dark:bg-rose-900/40 p-2 rounded break-words">
+                    {lastErrorMessage}
+                  </p>
+                  {lastErrorMessage.includes('row-level security') && (
+                    <div className="text-xs text-neutral-600 dark:text-neutral-400 space-y-1 pt-1">
+                      <p className="font-semibold text-neutral-800 dark:text-neutral-200">How to resolve in Supabase:</p>
+                      <p className="text-[11px]">Run this in your Supabase SQL Editor:</p>
+                      <pre className="font-mono text-[11px] bg-neutral-900 text-neutral-100 p-2 rounded overflow-x-auto select-all">
+ALTER TABLE notes DISABLE ROW LEVEL SECURITY;
+                      </pre>
+                    </div>
+                  )}
+                  {lastErrorMessage.includes('does not exist') && (
+                    <div className="text-xs text-neutral-600 dark:text-neutral-400 space-y-1 pt-1">
+                      <p className="font-semibold text-neutral-800 dark:text-neutral-200">How to resolve in Supabase:</p>
+                      <p className="text-[11px]">Run this in your Supabase SQL Editor:</p>
+                      <pre className="font-mono text-[11px] bg-neutral-900 text-neutral-100 p-2 rounded overflow-x-auto select-all">
+CREATE TABLE IF NOT EXISTS notes (
+  id TEXT NOT NULL,
+  vault_id TEXT NOT NULL,
+  encrypted_data TEXT NOT NULL,
+  version BIGINT NOT NULL DEFAULT 1,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  deleted BOOLEAN NOT NULL DEFAULT FALSE,
+  PRIMARY KEY (id, vault_id)
+);
+                      </pre>
+                    </div>
+                  )}
+                </div>
+              )}
 
               <div className="space-y-2">
                 <h4 className="text-xs font-semibold uppercase tracking-wider text-neutral-500 dark:text-neutral-400">

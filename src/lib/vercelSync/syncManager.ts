@@ -8,12 +8,10 @@ import {
   importRawEncryptionKey,
   encryptNote,
   decryptNote,
-  DerivedKeys,
 } from './crypto';
 import {
   getVercelCacheNotes,
   saveVercelCacheNote,
-  bulkSaveVercelCacheNotes,
   deleteVercelCacheNote,
   getSyncConfigItem,
   setSyncConfigItem,
@@ -23,7 +21,7 @@ import {
   removePendingPush,
 } from './cache';
 
-export type SyncStatusListener = (status: SyncStatus, lastSyncedAt?: number) => void;
+export type SyncStatusListener = (status: SyncStatus, lastSyncedAt?: number, errorMessage?: string | null) => void;
 export type SyncNotesListener = (updatedNotes: Note[]) => void;
 
 class VercelSyncManager {
@@ -31,6 +29,7 @@ class VercelSyncManager {
   private authKeyHex: string | null = null;
   private config: VercelSyncConfig | null = null;
   private status: SyncStatus = 'unconfigured';
+  private lastErrorMessage: string | null = null;
   private syncTimer: number | null = null;
   private isSyncing = false;
 
@@ -52,7 +51,7 @@ class VercelSyncManager {
 
   public subscribeStatus(listener: SyncStatusListener): () => void {
     this.statusListeners.add(listener);
-    listener(this.status, this.config?.lastSyncedAt);
+    listener(this.status, this.config?.lastSyncedAt, this.lastErrorMessage);
     return () => {
       this.statusListeners.delete(listener);
     };
@@ -65,13 +64,20 @@ class VercelSyncManager {
     };
   }
 
-  private setStatus(status: SyncStatus) {
+  private setStatus(status: SyncStatus, errorMessage: string | null = null) {
     this.status = status;
-    this.statusListeners.forEach((l) => l(this.status, this.config?.lastSyncedAt));
+    if (errorMessage !== null || status === 'synced') {
+      this.lastErrorMessage = errorMessage;
+    }
+    this.statusListeners.forEach((l) => l(this.status, this.config?.lastSyncedAt, this.lastErrorMessage));
   }
 
   public getStatus(): SyncStatus {
     return this.status;
+  }
+
+  public getLastError(): string | null {
+    return this.lastErrorMessage;
   }
 
   public getConfig(): VercelSyncConfig | null {
@@ -96,6 +102,8 @@ class VercelSyncManager {
         this.setStatus(navigator.onLine ? 'synced' : 'offline');
 
         this.startAutoSync();
+        // Initial sync on startup
+        this.sync();
         return true;
       } else {
         this.setStatus('unconfigured');
@@ -134,8 +142,9 @@ class VercelSyncManager {
 
     if (!response.ok) {
       const err = await response.json().catch(() => ({ error: 'Sync authentication failed' }));
-      this.setStatus('error');
-      throw new Error(err.error || 'Sync authentication failed');
+      const msg = err.error || `Sync authentication failed (HTTP ${response.status})`;
+      this.setStatus('error', msg);
+      throw new Error(msg);
     }
 
     const resData = await response.json();
@@ -216,6 +225,7 @@ class VercelSyncManager {
     this.encryptionKey = null;
     this.authKeyHex = null;
     this.config = null;
+    this.lastErrorMessage = null;
     await clearVercelSyncLocalData();
     this.setStatus('unconfigured');
   }
@@ -316,14 +326,16 @@ class VercelSyncManager {
       });
 
       if (!response.ok) {
+        const errJson = await response.json().catch(() => ({ error: `HTTP ${response.status}` }));
+        const msg = errJson.error || `Push failed (HTTP ${response.status})`;
         await queuePendingPush(envelope);
-        this.setStatus('error');
+        this.setStatus('error', msg);
       } else {
         await removePendingPush(envelope.noteId);
       }
-    } catch (err) {
+    } catch (err: any) {
       await queuePendingPush(envelope);
-      this.setStatus('offline');
+      this.setStatus('offline', err?.message || 'Network offline');
     }
   }
 
@@ -362,6 +374,9 @@ class VercelSyncManager {
           for (const env of pendingEnvelopes) {
             await removePendingPush(env.noteId);
           }
+        } else {
+          const errJson = await pushRes.json().catch(() => ({ error: `HTTP ${pushRes.status}` }));
+          throw new Error(errJson.error || `Sync push failed with status ${pushRes.status}`);
         }
       }
 
@@ -377,7 +392,8 @@ class VercelSyncManager {
       });
 
       if (!pullRes.ok) {
-        throw new Error(`Sync pull failed with status ${pullRes.status}`);
+        const errJson = await pullRes.json().catch(() => ({ error: `HTTP ${pullRes.status}` }));
+        throw new Error(errJson.error || `Sync pull failed with status ${pullRes.status}`);
       }
 
       const pullData = await pullRes.json();
@@ -400,11 +416,7 @@ class VercelSyncManager {
           // Decrypt incoming remote note (Zero-Knowledge)
           const decrypted = await decryptNote(envelope, this.encryptionKey);
           if (decrypted) {
-            if (decrypted.deletedAt || envelope.deleted) {
-              await saveVercelCacheNote(decrypted); // keep in trash
-            } else {
-              await saveVercelCacheNote(decrypted);
-            }
+            await saveVercelCacheNote(decrypted);
             localMap.set(decrypted.id, decrypted);
             hasChanges = true;
           }
@@ -419,10 +431,11 @@ class VercelSyncManager {
       // Update sync watermark
       this.config.lastSyncedAt = serverTimestamp;
       await setSyncConfigItem('sync_config', this.config);
-      this.setStatus('synced');
-    } catch (err) {
+      this.setStatus('synced', null);
+    } catch (err: any) {
       console.error('Vercel sync cycle error:', err);
-      this.setStatus(navigator.onLine ? 'error' : 'offline');
+      const msg = err?.message || 'Sync operation failed';
+      this.setStatus(navigator.onLine ? 'error' : 'offline', msg);
     } finally {
       this.isSyncing = false;
     }

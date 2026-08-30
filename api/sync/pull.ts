@@ -1,26 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { createClient, SupabaseClient } from '@supabase/supabase-js';
-
-let supabaseClient: SupabaseClient | null = null;
-function getSupabase(): SupabaseClient | null {
-  if (supabaseClient) return supabaseClient;
-  const url =
-    process.env.SUPABASE_URL ||
-    process.env.NEXT_PUBLIC_SUPABASE_URL ||
-    process.env.VITE_SUPABASE_URL;
-  const key =
-    process.env.SUPABASE_SERVICE_ROLE_KEY ||
-    process.env.SUPABASE_ANON_KEY ||
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
-    process.env.VITE_SUPABASE_ANON_KEY;
-
-  if (url && key) {
-    supabaseClient = createClient(url, key, {
-      auth: { persistSession: false },
-    });
-  }
-  return supabaseClient;
-}
+import { getSupabase, getSupabaseConfig } from '../lib/supabase';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader('Access-Control-Allow-Credentials', 'true');
@@ -54,8 +33,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const supabase = getSupabase();
     if (!supabase) {
+      const config = getSupabaseConfig();
       return res.status(500).json({
-        error: 'Supabase credentials not configured in Vercel environment variables (SUPABASE_URL / SUPABASE_ANON_KEY)',
+        error: `Supabase environment variables missing on Vercel. (SUPABASE_URL: ${
+          config.url ? 'found' : 'missing'
+        }, SUPABASE_ANON_KEY: ${config.key ? 'found' : 'missing'})`,
       });
     }
 
@@ -71,7 +53,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const { data, error } = await query;
     if (error) {
-      return res.status(500).json({ error: error.message });
+      console.error('Supabase pull error:', error);
+      if (error.message.includes('row-level security') || error.code === '42501') {
+        return res.status(500).json({
+          error:
+            'Supabase Row Level Security (RLS) is blocking reads. In your Supabase SQL editor, run: ALTER TABLE notes DISABLE ROW LEVEL SECURITY; or add a SELECT policy.',
+          code: 'RLS_VIOLATION',
+          detail: error.message,
+        });
+      }
+      if (error.message.includes('relation "notes" does not exist') || error.code === '42P01') {
+        return res.status(500).json({
+          error:
+            'Supabase table "notes" does not exist. In your Supabase SQL Editor, run the CREATE TABLE statement.',
+          code: 'TABLE_NOT_FOUND',
+          detail: error.message,
+        });
+      }
+      return res.status(500).json({ error: error.message, code: error.code });
     }
 
     const remoteNotes = (data || []).map((row: any) => {
@@ -102,6 +101,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       source: 'supabase',
     });
   } catch (err: any) {
+    console.error('Pull error:', err);
     return res.status(500).json({ error: err.message || 'Pull failed' });
   }
 }
