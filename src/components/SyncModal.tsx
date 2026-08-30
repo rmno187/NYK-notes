@@ -13,10 +13,8 @@ import {
   ChevronRight,
   LogOut,
   ArrowRight,
-  Info,
   CheckCircle2,
   XCircle,
-  ExternalLink,
 } from 'lucide-react';
 import { syncManager } from '../lib/vercelSync/syncManager';
 import { generateRecoveryPhrase } from '../lib/vercelSync/crypto';
@@ -24,6 +22,7 @@ import {
   getClientSupabaseConfig,
   saveCustomSupabaseConfig,
   testSupabaseConnection,
+  SchemaInspection,
 } from '../lib/vercelSync/supabaseDirect';
 import { VercelSyncConfig, SyncStatus } from '../types';
 
@@ -67,6 +66,7 @@ export const SyncModal: React.FC<SyncModalProps> = ({
     message: string;
     tableExists?: boolean;
     notesCount?: number;
+    schemaDetails?: SchemaInspection;
   } | null>(null);
 
   // Pairing states
@@ -87,7 +87,7 @@ export const SyncModal: React.FC<SyncModalProps> = ({
       setDbKey(currentDbConfig.anonKey);
     }
 
-    const unsubscribe = syncManager.subscribeStatus((newStatus, lastSyncedAt, errMsg) => {
+    const unsubscribe = syncManager.subscribeStatus((newStatus, _lastSyncedAt, errMsg) => {
       setStatus(newStatus);
       setConfig(syncManager.getConfig());
       setLastErrorMessage(errMsg || syncManager.getLastError());
@@ -278,8 +278,10 @@ export const SyncModal: React.FC<SyncModalProps> = ({
   const isConfigured = syncManager.isConfigured();
   const activeSupabaseConfig = getClientSupabaseConfig();
 
-  const SQL_SCRIPT = `-- 1. Create encrypted notes table
-CREATE TABLE IF NOT EXISTS notes (
+  const SQL_SCRIPT = `-- 1. Drop existing mismatched table if needed or create correct one
+DROP TABLE IF EXISTS notes;
+
+CREATE TABLE notes (
   id TEXT NOT NULL,
   vault_id TEXT NOT NULL,
   encrypted_data TEXT NOT NULL,
@@ -290,7 +292,10 @@ CREATE TABLE IF NOT EXISTS notes (
 );
 
 -- 2. Allow zero-knowledge E2EE push/pull
-ALTER TABLE notes DISABLE ROW LEVEL SECURITY;`;
+ALTER TABLE notes DISABLE ROW LEVEL SECURITY;
+
+-- 3. Notify PostgREST to refresh its column cache
+NOTIFY pgrst, 'reload schema';`;
 
   return (
     <div
@@ -492,6 +497,15 @@ ALTER TABLE notes DISABLE ROW LEVEL SECURITY;`;
                   <p className="text-xs text-rose-700 dark:text-rose-300 leading-relaxed font-mono text-[11px] bg-rose-100/50 dark:bg-rose-900/40 p-2 rounded break-words">
                     {lastErrorMessage}
                   </p>
+                  <div className="pt-1">
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab('database')}
+                      className="text-xs font-semibold underline text-rose-800 dark:text-rose-200"
+                    >
+                      Open Database Settings to inspect columns or run schema script →
+                    </button>
+                  </div>
                 </div>
               )}
 
@@ -543,7 +557,7 @@ ALTER TABLE notes DISABLE ROW LEVEL SECURITY;`;
               <div className="p-3.5 rounded-lg bg-neutral-50 dark:bg-neutral-900/60 border border-neutral-200 dark:border-neutral-800 space-y-2 text-xs">
                 <div className="flex items-center justify-between">
                   <span className="font-semibold text-neutral-900 dark:text-neutral-100 flex items-center gap-1.5">
-                    <Database className="w-3.5 h-3.5 text-emerald-500" /> Direct Supabase Connection
+                    <Database className="w-3.5 h-3.5 text-emerald-500" /> Supabase Connection & Schema
                   </span>
                   <button
                     type="button"
@@ -552,11 +566,11 @@ ALTER TABLE notes DISABLE ROW LEVEL SECURITY;`;
                     className="px-2 py-1 text-[11px] font-medium rounded border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 hover:bg-neutral-100 dark:hover:bg-neutral-700 text-neutral-800 dark:text-neutral-200 flex items-center gap-1"
                   >
                     <RefreshCw className={`w-3 h-3 ${isTestingDb ? 'animate-spin' : ''}`} />
-                    Test Connection
+                    Test Connection & Schema
                   </button>
                 </div>
                 <p className="text-[11px] text-neutral-500 dark:text-neutral-400 leading-relaxed">
-                  Connecting directly from the client ensures instant syncing with zero serverless proxy lag. Ciphertext is always encrypted in your browser before saving.
+                  Connecting directly ensures zero serverless proxy lag. Ciphertext is always encrypted in your browser before saving.
                 </p>
               </div>
 
@@ -574,12 +588,17 @@ ALTER TABLE notes DISABLE ROW LEVEL SECURITY;`;
                   ) : (
                     <XCircle className="w-4 h-4 text-rose-500 shrink-0 mt-0.5" />
                   )}
-                  <div className="space-y-1">
+                  <div className="space-y-1 flex-1">
                     <p className="font-medium">{dbTestResult.message}</p>
-                    {typeof dbTestResult.notesCount === 'number' && (
-                      <p className="text-[11px] opacity-80">
-                        Total encrypted sync records in table: {dbTestResult.notesCount}
-                      </p>
+                    {dbTestResult.schemaDetails && dbTestResult.schemaDetails.tableExists && (
+                      <div className="text-[11px] pt-1 space-y-0.5 opacity-90">
+                        <p>
+                          <strong>Columns found:</strong>{' '}
+                          {dbTestResult.schemaDetails.columnsDetected.length > 0
+                            ? dbTestResult.schemaDetails.columnsDetected.join(', ')
+                            : 'none detected yet'}
+                        </p>
+                      </div>
                     )}
                   </div>
                 </div>
@@ -643,7 +662,7 @@ ALTER TABLE notes DISABLE ROW LEVEL SECURITY;`;
               <div className="p-3.5 rounded-lg border border-neutral-200 dark:border-neutral-800 bg-neutral-50/50 dark:bg-neutral-900/30 space-y-2 text-xs">
                 <div className="flex items-center justify-between">
                   <span className="font-semibold text-neutral-900 dark:text-neutral-100">
-                    Supabase SQL Setup Query
+                    Supabase Schema SQL Script
                   </span>
                   <button
                     type="button"
@@ -654,6 +673,9 @@ ALTER TABLE notes DISABLE ROW LEVEL SECURITY;`;
                     {copiedSql ? 'Copied SQL' : 'Copy SQL'}
                   </button>
                 </div>
+                <p className="text-[11px] text-neutral-500 dark:text-neutral-400 leading-normal">
+                  If Supabase reports <em>"Could not find the 'id' column of 'notes' in the schema cache"</em>, run this in your <strong>Supabase SQL Editor</strong> to reload the PostgREST schema cache:
+                </p>
                 <pre className="font-mono text-[10px] p-2.5 rounded bg-neutral-900 text-neutral-100 overflow-x-auto leading-relaxed select-all">
                   {SQL_SCRIPT}
                 </pre>

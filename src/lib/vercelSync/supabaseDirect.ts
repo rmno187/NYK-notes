@@ -6,6 +6,15 @@ export interface SupabaseCredentials {
   anonKey: string;
 }
 
+export interface SchemaInspection {
+  tableExists: boolean;
+  hasId: boolean;
+  hasVaultId: boolean;
+  hasEncryptedData: boolean;
+  columnsDetected: string[];
+  notesCount: number;
+}
+
 const STORAGE_KEY_URL = 'app_supabase_url';
 const STORAGE_KEY_ANON = 'app_supabase_anon_key';
 
@@ -77,11 +86,68 @@ export function getDirectSupabaseClient(): SupabaseClient | null {
   }
 }
 
+export async function inspectTableSchema(client: SupabaseClient): Promise<SchemaInspection> {
+  const result: SchemaInspection = {
+    tableExists: false,
+    hasId: false,
+    hasVaultId: false,
+    hasEncryptedData: false,
+    columnsDetected: [],
+    notesCount: 0,
+  };
+
+  try {
+    // 1. Check if table exists & count
+    const { count, error: countErr } = await client
+      .from('notes')
+      .select('*', { count: 'exact', head: true });
+
+    if (countErr) {
+      return result;
+    }
+
+    result.tableExists = true;
+    result.notesCount = count ?? 0;
+
+    // 2. Fetch a single row to inspect columns if any exist
+    const { data: sampleRows } = await client.from('notes').select('*').limit(1);
+    if (sampleRows && sampleRows.length > 0) {
+      const keys = Object.keys(sampleRows[0]);
+      result.columnsDetected = keys;
+      result.hasId = keys.includes('id');
+      result.hasVaultId = keys.includes('vault_id');
+      result.hasEncryptedData = keys.includes('encrypted_data');
+      return result;
+    }
+
+    // 3. If table is empty, test columns by doing a dummy single select
+    const testId = await client.from('notes').select('id').limit(0);
+    result.hasId = !testId.error;
+
+    const testVault = await client.from('notes').select('vault_id').limit(0);
+    result.hasVaultId = !testVault.error;
+
+    const testEnc = await client.from('notes').select('encrypted_data').limit(0);
+    result.hasEncryptedData = !testEnc.error;
+
+    const detected: string[] = [];
+    if (result.hasId) detected.push('id');
+    if (result.hasVaultId) detected.push('vault_id');
+    if (result.hasEncryptedData) detected.push('encrypted_data');
+    result.columnsDetected = detected;
+
+    return result;
+  } catch {
+    return result;
+  }
+}
+
 export async function testSupabaseConnection(customConfig?: SupabaseCredentials): Promise<{
   success: boolean;
   message: string;
   tableExists: boolean;
   notesCount?: number;
+  schemaDetails?: SchemaInspection;
 }> {
   try {
     const config = customConfig || getClientSupabaseConfig();
@@ -97,37 +163,37 @@ export async function testSupabaseConnection(customConfig?: SupabaseCredentials)
       auth: { persistSession: false },
     });
 
-    const { count, error } = await client
-      .from('notes')
-      .select('*', { count: 'exact', head: true });
+    const inspection = await inspectTableSchema(client);
 
-    if (error) {
-      if (error.code === '42P01' || error.message.includes('does not exist')) {
-        return {
-          success: true,
-          message: 'Connected to Supabase project, but the "notes" table has not been created yet.',
-          tableExists: false,
-        };
-      }
-      if (error.code === '42501' || error.message.includes('row-level security')) {
-        return {
-          success: false,
-          message: 'Connected, but Row-Level Security (RLS) is blocking access. Run: ALTER TABLE notes DISABLE ROW LEVEL SECURITY;',
-          tableExists: true,
-        };
-      }
+    if (!inspection.tableExists) {
       return {
         success: false,
-        message: error.message || 'Database query error',
+        message: 'Could not connect to the "notes" table. Please create it using the SQL query below.',
         tableExists: false,
+        schemaDetails: inspection,
+      };
+    }
+
+    if (!inspection.hasId || !inspection.hasVaultId || !inspection.hasEncryptedData) {
+      const missing: string[] = [];
+      if (!inspection.hasId) missing.push("'id'");
+      if (!inspection.hasVaultId) missing.push("'vault_id'");
+      if (!inspection.hasEncryptedData) missing.push("'encrypted_data'");
+
+      return {
+        success: false,
+        message: `The 'notes' table is missing required column(s): ${missing.join(', ')}. Run the schema SQL script in your Supabase SQL Editor.`,
+        tableExists: true,
+        schemaDetails: inspection,
       };
     }
 
     return {
       success: true,
-      message: `Connected successfully! Found ${count ?? 0} encrypted records in "notes" table.`,
+      message: `Connected successfully! Table schema verified with all required columns. Found ${inspection.notesCount} encrypted records.`,
       tableExists: true,
-      notesCount: count ?? 0,
+      notesCount: inspection.notesCount,
+      schemaDetails: inspection,
     };
   } catch (err: any) {
     return {
@@ -187,7 +253,7 @@ export async function pushNotesDirectToSupabase(
   }
 
   // 3. Fallback: single item delete + insert if conflict constraint is missing
-  if (error && error.code !== '42501' && !error.message.includes('row-level security')) {
+  if (error && error.code !== '42501' && !error.message.includes('row-level security') && !error.message.includes('column')) {
     for (const r of rows) {
       await supabase.from('notes').delete().eq('id', r.id).eq('vault_id', r.vault_id);
       const ins = await supabase.from('notes').insert(r);
@@ -202,7 +268,11 @@ export async function pushNotesDirectToSupabase(
 
   if (error) {
     console.error('Supabase direct push error:', error);
-    return { success: false, count: 0, error: error.message || error.code };
+    let userMsg = error.message || error.code;
+    if (error.message?.includes('column') || error.message?.includes('schema cache')) {
+      userMsg = `${error.message}. The 'notes' table in your Supabase database doesn't have the expected schema. Run the CREATE TABLE script in your Supabase SQL Editor.`;
+    }
+    return { success: false, count: 0, error: userMsg };
   }
 
   return { success: true, count: rows.length };
@@ -217,9 +287,10 @@ export async function pullNotesDirectFromSupabase(
     return { success: false, envelopes: [], serverTimestamp: Date.now(), error: 'Direct Supabase client not initialized' };
   }
 
+  // Query table
   let query = supabase
     .from('notes')
-    .select('id, vault_id, encrypted_data, version, updated_at, deleted')
+    .select('*')
     .eq('vault_id', vaultId);
 
   if (since > 0) {
@@ -229,30 +300,38 @@ export async function pullNotesDirectFromSupabase(
   const { data, error } = await query;
   if (error) {
     console.error('Supabase direct pull error:', error);
-    return { success: false, envelopes: [], serverTimestamp: Date.now(), error: error.message || error.code };
+    let userMsg = error.message || error.code;
+    if (error.message?.includes('column') || error.message?.includes('schema cache')) {
+      userMsg = `${error.message}. The 'notes' table is missing expected columns. Please update your table schema in Supabase.`;
+    }
+    return { success: false, envelopes: [], serverTimestamp: Date.now(), error: userMsg };
   }
 
-  const envelopes: EncryptedNoteEnvelope[] = (data || []).map((row: any) => {
-    let ciphertext = '';
-    let iv = '';
-    try {
-      const parsed = JSON.parse(row.encrypted_data);
-      ciphertext = parsed.ciphertext;
-      iv = parsed.iv;
-    } catch {
-      ciphertext = row.encrypted_data;
-    }
+  const envelopes: EncryptedNoteEnvelope[] = (data || [])
+    .filter((row: any) => row.id && (row.encrypted_data || row.ciphertext))
+    .map((row: any) => {
+      let ciphertext = '';
+      let iv = '';
+      const rawEnc = row.encrypted_data || row.ciphertext || '';
+      try {
+        const parsed = JSON.parse(rawEnc);
+        ciphertext = parsed.ciphertext || rawEnc;
+        iv = parsed.iv || row.iv || '';
+      } catch {
+        ciphertext = rawEnc;
+        iv = row.iv || '';
+      }
 
-    return {
-      noteId: row.id,
-      vaultId: row.vault_id || vaultId,
-      version: Number(row.version || 1),
-      ciphertext,
-      iv,
-      updatedAt: new Date(row.updated_at).getTime(),
-      deleted: Boolean(row.deleted),
-    };
-  });
+      return {
+        noteId: row.id,
+        vaultId: row.vault_id || vaultId,
+        version: Number(row.version || 1),
+        ciphertext,
+        iv,
+        updatedAt: row.updated_at ? new Date(row.updated_at).getTime() : Date.now(),
+        deleted: Boolean(row.deleted),
+      };
+    });
 
   return {
     success: true,
