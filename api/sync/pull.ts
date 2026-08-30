@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { getSupabase, getSupabaseConfig } from '../lib/supabase';
+import { getSupabase, getSupabaseConfig, getBearerToken, parseRequestBody } from '../lib/supabase';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader('Access-Control-Allow-Credentials', 'true');
@@ -14,28 +14,35 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(200).end();
   }
 
-  if (req.method !== 'GET') {
+  if (req.method !== 'GET' && req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
   try {
-    const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    const authKey = getBearerToken(req);
+    if (!authKey) {
       return res.status(401).json({ error: 'Missing or malformed Authorization header' });
     }
 
-    const vaultId = (req.query.vaultId || req.query.accountId) as string;
-    const since = Number(req.query.since || 0);
+    const body = req.method === 'POST' ? parseRequestBody(req) : {};
+    const targetVaultId =
+      (req.query.vaultId as string) ||
+      (req.query.accountId as string) ||
+      body.vaultId ||
+      body.accountId;
 
-    if (!vaultId) {
-      return res.status(400).json({ error: 'vaultId required' });
+    if (!targetVaultId) {
+      return res.status(400).json({ error: 'vaultId or accountId required in query parameter or body' });
     }
+
+    const sinceParam = req.query.since || body.since || 0;
+    const since = Number(sinceParam) || 0;
 
     const supabase = getSupabase();
     if (!supabase) {
       const config = getSupabaseConfig();
       return res.status(500).json({
-        error: `Supabase environment variables missing on Vercel. SUPABASE_URL: ${
+        error: `Supabase credentials missing on Vercel. SUPABASE_URL: ${
           config.url ? 'found' : 'MISSING'
         }, SUPABASE_ANON_KEY: ${config.key ? 'found' : 'MISSING'}. Go to Vercel Settings > Environment Variables.`,
       });
@@ -44,14 +51,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     let query = supabase
       .from('notes')
       .select('id, vault_id, encrypted_data, version, updated_at, deleted')
-      .eq('vault_id', vaultId);
+      .eq('vault_id', targetVaultId);
 
     if (since > 0) {
-      const sinceIso = new Date(since).toISOString();
-      query = query.gt('updated_at', sinceIso);
+      query = query.gt('updated_at', new Date(since).toISOString());
     }
 
     const { data, error } = await query;
+
     if (error) {
       console.error('Supabase pull error:', error);
       if (error.message?.includes('row-level security') || error.code === '42501') {
@@ -71,7 +78,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         });
       }
       return res.status(500).json({
-        error: `Supabase Error: ${error.message || error.code || 'Unknown DB error'}`,
+        error: `Supabase Error: ${error.message || error.code || 'Query failed'}`,
         code: error.code,
         hint: error.hint,
       });
@@ -90,7 +97,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       return {
         noteId: row.id,
-        vaultId: row.vault_id || vaultId,
+        vaultId: row.vault_id || targetVaultId,
         version: Number(row.version || 1),
         ciphertext,
         iv,
@@ -102,10 +109,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(200).json({
       notes: remoteNotes,
       serverTimestamp: Date.now(),
-      source: 'supabase',
+      count: remoteNotes.length,
     });
   } catch (err: any) {
-    console.error('Pull error:', err);
-    return res.status(500).json({ error: err.message || 'Pull failed unexpectedly' });
+    console.error('Unexpected error in pull handler:', err);
+    return res.status(500).json({
+      error: `Pull failed: ${err.message || 'Internal server error'}`,
+    });
   }
 }

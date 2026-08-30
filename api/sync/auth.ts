@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { getSupabase, getSupabaseConfig } from '../lib/supabase';
+import { getSupabase, getSupabaseConfig, parseRequestBody } from '../lib/supabase';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader('Access-Control-Allow-Credentials', 'true');
@@ -19,32 +19,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
-    const { authKeyHex, authSalt, vaultId, accountId } = req.body || {};
-    const targetVaultId = vaultId || accountId;
+    const body = parseRequestBody(req);
+    const { authKeyHex, authSalt, accountId, vaultId } = body;
 
     if (!authKeyHex || !authSalt) {
       return res.status(400).json({ error: 'authKeyHex and authSalt are required' });
     }
 
-    const { url, key } = getSupabaseConfig();
+    const targetVaultId = accountId || vaultId || 'vault_' + authKeyHex.substring(0, 16);
     const supabase = getSupabase();
-
-    if (!supabase) {
-      return res.status(500).json({
-        error:
-          'Supabase credentials missing on Vercel. Ensure SUPABASE_URL and SUPABASE_ANON_KEY are set in your Vercel Project Settings > Environment Variables.',
-      });
-    }
-
-    const newVaultId = targetVaultId || 'vault_' + Math.random().toString(36).substring(2, 14);
+    const config = getSupabaseConfig();
 
     return res.status(200).json({
-      vaultId: newVaultId,
-      accountId: newVaultId,
-      isNew: !targetVaultId,
-      supabaseConnected: true,
+      vaultId: targetVaultId,
+      accountId: targetVaultId,
+      supabaseConnected: Boolean(supabase),
+      source: config.source,
+      isNew: !accountId,
     });
   } catch (err: any) {
-    return res.status(500).json({ error: err.message || 'Auth error' });
+    return res.status(500).json({ error: err.message || 'Auth check error' });
   }
 }

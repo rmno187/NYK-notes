@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { getSupabase, getSupabaseConfig } from '../lib/supabase';
+import { getSupabase, getSupabaseConfig, parseRequestBody, getBearerToken } from '../lib/supabase';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader('Access-Control-Allow-Credentials', 'true');
@@ -19,20 +19,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
-    const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    const authKey = getBearerToken(req);
+    if (!authKey) {
       return res.status(401).json({ error: 'Missing or malformed Authorization header' });
     }
 
-    const { accountId, vaultId, changes } = req.body || {};
-    const targetVaultId = vaultId || accountId;
+    const body = parseRequestBody(req);
+    const targetVaultId = body.vaultId || body.accountId || (req.query?.vaultId as string) || (req.query?.accountId as string);
+    const changes = body.changes;
 
     if (!targetVaultId) {
-      return res.status(400).json({ error: 'vaultId required' });
+      return res.status(400).json({ error: 'vaultId or accountId required in request body or query' });
     }
 
     if (!Array.isArray(changes)) {
-      return res.status(400).json({ error: 'changes must be an array' });
+      return res.status(400).json({ error: 'changes must be an array of note envelopes' });
     }
 
     const supabase = getSupabase();
@@ -40,7 +41,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const config = getSupabaseConfig();
       return res.status(500).json({
         error: `Supabase environment variables missing on Vercel. SUPABASE_URL: ${
-          config.url ? 'found (' + config.url.substring(0, 15) + '...)' : 'MISSING'
+          config.url ? 'found' : 'MISSING'
         }, SUPABASE_ANON_KEY: ${config.key ? 'found' : 'MISSING'}. Go to Vercel Settings > Environment Variables.`,
       });
     }
@@ -50,7 +51,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const supabaseRows = changes
-      .filter((c: any) => c.noteId && c.ciphertext && c.iv)
+      .filter((c: any) => c && c.noteId && c.ciphertext && c.iv)
       .map((c: any) => {
         const envelopeJson = JSON.stringify({
           ciphertext: c.ciphertext,
@@ -67,68 +68,72 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         };
       });
 
-    if (supabaseRows.length > 0) {
-      // 1. Try standard upsert with composite key (id, vault_id)
-      let upsertResult = await supabase.from('notes').upsert(supabaseRows, {
-        onConflict: 'id,vault_id',
+    if (supabaseRows.length === 0) {
+      return res.status(200).json({ success: true, count: 0 });
+    }
+
+    // 1. Try standard upsert with composite key (id, vault_id)
+    let upsertResult = await supabase.from('notes').upsert(supabaseRows, {
+      onConflict: 'id,vault_id',
+    });
+
+    // 2. If composite key constraint wasn't created, retry with single key 'id'
+    if (upsertResult.error && (upsertResult.error.message.includes('onConflict') || upsertResult.error.code === '42P10')) {
+      upsertResult = await supabase.from('notes').upsert(supabaseRows, {
+        onConflict: 'id',
       });
+    }
 
-      // 2. If composite key constraint wasn't created, retry with single key 'id'
-      if (upsertResult.error && (upsertResult.error.message.includes('onConflict') || upsertResult.error.code === '42P10')) {
-        upsertResult = await supabase.from('notes').upsert(supabaseRows, {
-          onConflict: 'id',
-        });
-      }
-
-      // 3. If standard upsert still fails with a schema error, try raw insert
-      if (upsertResult.error && upsertResult.error.code !== '42501') {
-        // Try delete + insert per item to handle different table setups
-        for (const row of supabaseRows) {
-          await supabase.from('notes').delete().eq('id', row.id).eq('vault_id', row.vault_id);
-          const ins = await supabase.from('notes').insert(row);
-          if (ins.error) {
-            upsertResult = ins;
-            break;
-          }
+    // 3. If standard upsert still fails, fallback to delete + insert
+    if (upsertResult.error && upsertResult.error.code !== '42501' && !upsertResult.error.message.includes('row-level security')) {
+      for (const row of supabaseRows) {
+        await supabase.from('notes').delete().eq('id', row.id).eq('vault_id', row.vault_id);
+        const ins = await supabase.from('notes').insert(row);
+        if (ins.error) {
+          upsertResult = ins;
+          break;
+        } else {
+          upsertResult = { data: null, error: null } as any;
         }
       }
+    }
 
-      if (upsertResult.error) {
-        const error = upsertResult.error;
-        console.error('Supabase push error:', error);
-        
-        if (error.message?.includes('row-level security') || error.code === '42501') {
-          return res.status(500).json({
-            error:
-              'Supabase Row Level Security (RLS) is blocking inserts. In Supabase SQL Editor run: ALTER TABLE notes DISABLE ROW LEVEL SECURITY;',
-            code: 'RLS_VIOLATION',
-            detail: error.message,
-          });
-        }
-        if (error.message?.includes('relation "notes" does not exist') || error.code === '42P01') {
-          return res.status(500).json({
-            error:
-              'Supabase table "notes" does not exist. Run the CREATE TABLE script in your Supabase SQL Editor.',
-            code: 'TABLE_NOT_FOUND',
-            detail: error.message,
-          });
-        }
+    if (upsertResult.error) {
+      const error = upsertResult.error;
+      console.error('Supabase push error:', error);
+      
+      if (error.message?.includes('row-level security') || error.code === '42501') {
         return res.status(500).json({
-          error: `Supabase Error: ${error.message || error.code || 'Unknown DB error'}`,
-          code: error.code,
-          hint: error.hint,
+          error:
+            'Supabase Row Level Security (RLS) is blocking inserts. In Supabase SQL Editor run: ALTER TABLE notes DISABLE ROW LEVEL SECURITY;',
+          code: 'RLS_VIOLATION',
+          detail: error.message,
         });
       }
+      if (error.message?.includes('relation "notes" does not exist') || error.code === '42P01') {
+        return res.status(500).json({
+          error:
+            'Supabase table "notes" does not exist. Run the CREATE TABLE script in your Supabase SQL Editor.',
+          code: 'TABLE_NOT_FOUND',
+          detail: error.message,
+        });
+      }
+      return res.status(500).json({
+        error: `Supabase Error: ${error.message || error.code || 'Unknown DB error'}`,
+        code: error.code,
+        hint: error.hint,
+      });
     }
 
     return res.status(200).json({
       success: true,
-      count: changes.length,
+      count: supabaseRows.length,
       serverTimestamp: Date.now(),
-      persistedToSupabase: true,
     });
   } catch (err: any) {
-    console.error('Push error:', err);
-    return res.status(500).json({ error: err.message || 'Push failed unexpectedly' });
+    console.error('Unexpected error in push handler:', err);
+    return res.status(500).json({
+      error: `Push failed: ${err.message || 'Internal server error'}`,
+    });
   }
 }

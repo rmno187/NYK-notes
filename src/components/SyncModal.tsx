@@ -9,13 +9,22 @@ import {
   RefreshCw,
   AlertTriangle,
   KeyRound,
+  Database,
   ChevronRight,
   LogOut,
   ArrowRight,
-  Info
+  Info,
+  CheckCircle2,
+  XCircle,
+  ExternalLink,
 } from 'lucide-react';
 import { syncManager } from '../lib/vercelSync/syncManager';
 import { generateRecoveryPhrase } from '../lib/vercelSync/crypto';
+import {
+  getClientSupabaseConfig,
+  saveCustomSupabaseConfig,
+  testSupabaseConnection,
+} from '../lib/vercelSync/supabaseDirect';
 import { VercelSyncConfig, SyncStatus } from '../types';
 
 interface SyncModalProps {
@@ -35,7 +44,8 @@ export const SyncModal: React.FC<SyncModalProps> = ({
     if (onConfigured) onConfigured();
     if (onSyncConfigured) onSyncConfigured();
   };
-  const [activeTab, setActiveTab] = useState<'status' | 'setup' | 'pair' | 'recovery' | 'security'>('status');
+
+  const [activeTab, setActiveTab] = useState<'status' | 'setup' | 'database' | 'pair' | 'recovery' | 'security'>('status');
   const [status, setStatus] = useState<SyncStatus>(syncManager.getStatus());
   const [config, setConfig] = useState<VercelSyncConfig | null>(syncManager.getConfig());
 
@@ -46,6 +56,18 @@ export const SyncModal: React.FC<SyncModalProps> = ({
   const [isSettingUp, setIsSettingUp] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [copiedKey, setCopiedKey] = useState(false);
+  const [copiedSql, setCopiedSql] = useState(false);
+
+  // Database Connection settings
+  const [dbUrl, setDbUrl] = useState('');
+  const [dbKey, setDbKey] = useState('');
+  const [isTestingDb, setIsTestingDb] = useState(false);
+  const [dbTestResult, setDbTestResult] = useState<{
+    success: boolean;
+    message: string;
+    tableExists?: boolean;
+    notesCount?: number;
+  } | null>(null);
 
   // Pairing states
   const [pairingCode, setPairingCode] = useState<string | null>(null);
@@ -58,6 +80,12 @@ export const SyncModal: React.FC<SyncModalProps> = ({
 
   useEffect(() => {
     if (!isOpen) return;
+
+    const currentDbConfig = getClientSupabaseConfig();
+    if (currentDbConfig) {
+      setDbUrl(currentDbConfig.url);
+      setDbKey(currentDbConfig.anonKey);
+    }
 
     const unsubscribe = syncManager.subscribeStatus((newStatus, lastSyncedAt, errMsg) => {
       setStatus(newStatus);
@@ -77,6 +105,46 @@ export const SyncModal: React.FC<SyncModalProps> = ({
   }, [isOpen]);
 
   if (!isOpen) return null;
+
+  const handleTestDatabase = async (overrideUrl?: string, overrideKey?: string) => {
+    setIsTestingDb(true);
+    setDbTestResult(null);
+    try {
+      const urlToTest = overrideUrl ?? dbUrl;
+      const keyToTest = overrideKey ?? dbKey;
+      const res = await testSupabaseConnection(
+        urlToTest && keyToTest ? { url: urlToTest, anonKey: keyToTest } : undefined
+      );
+      setDbTestResult(res);
+      if (res.success && overrideUrl && overrideKey) {
+        saveCustomSupabaseConfig(overrideUrl, overrideKey);
+      }
+    } catch (err: any) {
+      setDbTestResult({
+        success: false,
+        message: err.message || 'Connection test failed',
+      });
+    } finally {
+      setIsTestingDb(false);
+    }
+  };
+
+  const handleSaveDatabaseCredentials = async () => {
+    if (!dbUrl.trim() || !dbKey.trim()) {
+      saveCustomSupabaseConfig('', '');
+      setDbTestResult({
+        success: false,
+        message: 'Credentials cleared. Using environment variables.',
+      });
+      return;
+    }
+
+    saveCustomSupabaseConfig(dbUrl.trim(), dbKey.trim());
+    await handleTestDatabase(dbUrl.trim(), dbKey.trim());
+    if (syncManager.isConfigured()) {
+      syncManager.sync();
+    }
+  };
 
   const handleCreateNewSyncAccount = async () => {
     setIsSettingUp(true);
@@ -201,7 +269,28 @@ export const SyncModal: React.FC<SyncModalProps> = ({
     setTimeout(() => setCopiedKey(false), 2000);
   };
 
+  const copySqlToClipboard = (text: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedSql(true);
+    setTimeout(() => setCopiedSql(false), 2000);
+  };
+
   const isConfigured = syncManager.isConfigured();
+  const activeSupabaseConfig = getClientSupabaseConfig();
+
+  const SQL_SCRIPT = `-- 1. Create encrypted notes table
+CREATE TABLE IF NOT EXISTS notes (
+  id TEXT NOT NULL,
+  vault_id TEXT NOT NULL,
+  encrypted_data TEXT NOT NULL,
+  version BIGINT NOT NULL DEFAULT 1,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  deleted BOOLEAN NOT NULL DEFAULT FALSE,
+  PRIMARY KEY (id, vault_id)
+);
+
+-- 2. Allow zero-knowledge E2EE push/pull
+ALTER TABLE notes DISABLE ROW LEVEL SECURITY;`;
 
   return (
     <div
@@ -229,7 +318,7 @@ export const SyncModal: React.FC<SyncModalProps> = ({
                 </span>
               </div>
               <p className="text-xs text-neutral-500 dark:text-neutral-400">
-                End-to-end encrypted across your devices.
+                Direct client-side encrypted sync with Supabase storage.
               </p>
             </div>
           </div>
@@ -244,11 +333,11 @@ export const SyncModal: React.FC<SyncModalProps> = ({
         </div>
 
         {/* Tab Navigation */}
-        <div className="px-6 border-b border-neutral-200 dark:border-neutral-800 flex gap-4 text-xs font-medium bg-neutral-50/50 dark:bg-neutral-900/30">
+        <div className="px-6 border-b border-neutral-200 dark:border-neutral-800 flex gap-4 text-xs font-medium bg-neutral-50/50 dark:bg-neutral-900/30 overflow-x-auto">
           {isConfigured && (
             <button
               onClick={() => { setActiveTab('status'); setErrorMessage(null); }}
-              className={`py-2.5 border-b-2 transition-colors ${
+              className={`py-2.5 border-b-2 transition-colors shrink-0 ${
                 activeTab === 'status'
                   ? 'border-black dark:border-white text-black dark:text-white'
                   : 'border-transparent text-neutral-500 hover:text-black dark:hover:text-white'
@@ -259,20 +348,44 @@ export const SyncModal: React.FC<SyncModalProps> = ({
           )}
 
           <button
-            onClick={() => { setActiveTab(isConfigured ? 'pair' : 'setup'); setErrorMessage(null); }}
-            className={`py-2.5 border-b-2 transition-colors ${
-              activeTab === 'setup' || activeTab === 'pair'
+            onClick={() => { setActiveTab('database'); setErrorMessage(null); }}
+            className={`py-2.5 border-b-2 transition-colors shrink-0 flex items-center gap-1.5 ${
+              activeTab === 'database'
                 ? 'border-black dark:border-white text-black dark:text-white'
                 : 'border-transparent text-neutral-500 hover:text-black dark:hover:text-white'
             }`}
           >
-            {isConfigured ? 'Pair Devices' : 'Setup & Connect'}
+            <Database className="w-3.5 h-3.5" /> Database Settings
+          </button>
+
+          {!isConfigured && (
+            <button
+              onClick={() => { setActiveTab('setup'); setErrorMessage(null); }}
+              className={`py-2.5 border-b-2 transition-colors shrink-0 ${
+                activeTab === 'setup'
+                  ? 'border-black dark:border-white text-black dark:text-white'
+                  : 'border-transparent text-neutral-500 hover:text-black dark:hover:text-white'
+              }`}
+            >
+              Account Setup
+            </button>
+          )}
+
+          <button
+            onClick={() => { setActiveTab('pair'); setErrorMessage(null); }}
+            className={`py-2.5 border-b-2 transition-colors shrink-0 ${
+              activeTab === 'pair'
+                ? 'border-black dark:border-white text-black dark:text-white'
+                : 'border-transparent text-neutral-500 hover:text-black dark:hover:text-white'
+            }`}
+          >
+            Pair Devices
           </button>
 
           {isConfigured && (
             <button
               onClick={() => { setActiveTab('recovery'); setErrorMessage(null); }}
-              className={`py-2.5 border-b-2 transition-colors ${
+              className={`py-2.5 border-b-2 transition-colors shrink-0 ${
                 activeTab === 'recovery'
                   ? 'border-black dark:border-white text-black dark:text-white'
                   : 'border-transparent text-neutral-500 hover:text-black dark:hover:text-white'
@@ -284,7 +397,7 @@ export const SyncModal: React.FC<SyncModalProps> = ({
 
           <button
             onClick={() => { setActiveTab('security'); setErrorMessage(null); }}
-            className={`py-2.5 border-b-2 transition-colors ${
+            className={`py-2.5 border-b-2 transition-colors shrink-0 ${
               activeTab === 'security'
                 ? 'border-black dark:border-white text-black dark:text-white'
                 : 'border-transparent text-neutral-500 hover:text-black dark:hover:text-white'
@@ -294,8 +407,8 @@ export const SyncModal: React.FC<SyncModalProps> = ({
           </button>
         </div>
 
-        {/* Modal Body */}
-        <div className="p-6 space-y-4 max-h-[70vh] overflow-y-auto">
+        {/* Content Area */}
+        <div className="p-6 space-y-4 max-h-[75vh] overflow-y-auto">
           {errorMessage && (
             <div className="p-3 rounded-md bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/50 flex items-start gap-2.5 text-xs text-rose-700 dark:text-rose-300">
               <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
@@ -331,7 +444,7 @@ export const SyncModal: React.FC<SyncModalProps> = ({
                   <p className="text-xs text-neutral-500 dark:text-neutral-400">
                     {config?.lastSyncedAt
                       ? `Last synced: ${new Date(config.lastSyncedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`
-                      : 'Auto-sync active'}
+                      : 'Auto-sync active (30s)'}
                   </p>
                 </div>
 
@@ -345,6 +458,30 @@ export const SyncModal: React.FC<SyncModalProps> = ({
                 </button>
               </div>
 
+              {/* Database Connection Summary Badge */}
+              <div className="p-3.5 rounded-lg border border-neutral-200 dark:border-neutral-800 bg-neutral-50/50 dark:bg-neutral-900/30 flex items-center justify-between text-xs">
+                <div className="flex items-center gap-2">
+                  <Database className="w-4 h-4 text-emerald-500" />
+                  <div>
+                    <span className="font-medium text-neutral-900 dark:text-neutral-100">
+                      {activeSupabaseConfig ? 'Direct Supabase E2EE' : 'Serverless API Relay'}
+                    </span>
+                    <p className="text-[11px] text-neutral-500">
+                      {activeSupabaseConfig
+                        ? `Connected to ${activeSupabaseConfig.url.substring(0, 24)}...`
+                        : 'No direct database credentials; using backend API relay'}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('database')}
+                  className="text-[11px] font-medium text-neutral-700 dark:text-neutral-300 hover:underline flex items-center gap-1"
+                >
+                  Configure <ChevronRight className="w-3 h-3" />
+                </button>
+              </div>
+
               {/* Sync Error Diagnostic Alert */}
               {status === 'error' && lastErrorMessage && (
                 <div className="p-3.5 rounded-lg border border-rose-200 dark:border-rose-900/60 bg-rose-50/50 dark:bg-rose-950/20 space-y-2">
@@ -355,32 +492,6 @@ export const SyncModal: React.FC<SyncModalProps> = ({
                   <p className="text-xs text-rose-700 dark:text-rose-300 leading-relaxed font-mono text-[11px] bg-rose-100/50 dark:bg-rose-900/40 p-2 rounded break-words">
                     {lastErrorMessage}
                   </p>
-                  {lastErrorMessage.includes('row-level security') && (
-                    <div className="text-xs text-neutral-600 dark:text-neutral-400 space-y-1 pt-1">
-                      <p className="font-semibold text-neutral-800 dark:text-neutral-200">How to resolve in Supabase:</p>
-                      <p className="text-[11px]">Run this in your Supabase SQL Editor:</p>
-                      <pre className="font-mono text-[11px] bg-neutral-900 text-neutral-100 p-2 rounded overflow-x-auto select-all">
-ALTER TABLE notes DISABLE ROW LEVEL SECURITY;
-                      </pre>
-                    </div>
-                  )}
-                  {lastErrorMessage.includes('does not exist') && (
-                    <div className="text-xs text-neutral-600 dark:text-neutral-400 space-y-1 pt-1">
-                      <p className="font-semibold text-neutral-800 dark:text-neutral-200">How to resolve in Supabase:</p>
-                      <p className="text-[11px]">Run this in your Supabase SQL Editor:</p>
-                      <pre className="font-mono text-[11px] bg-neutral-900 text-neutral-100 p-2 rounded overflow-x-auto select-all">
-CREATE TABLE IF NOT EXISTS notes (
-  id TEXT NOT NULL,
-  vault_id TEXT NOT NULL,
-  encrypted_data TEXT NOT NULL,
-  version BIGINT NOT NULL DEFAULT 1,
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  deleted BOOLEAN NOT NULL DEFAULT FALSE,
-  PRIMARY KEY (id, vault_id)
-);
-                      </pre>
-                    </div>
-                  )}
                 </div>
               )}
 
@@ -426,26 +537,150 @@ CREATE TABLE IF NOT EXISTS notes (
             </div>
           )}
 
+          {/* TAB: DATABASE SETTINGS */}
+          {activeTab === 'database' && (
+            <div className="space-y-4">
+              <div className="p-3.5 rounded-lg bg-neutral-50 dark:bg-neutral-900/60 border border-neutral-200 dark:border-neutral-800 space-y-2 text-xs">
+                <div className="flex items-center justify-between">
+                  <span className="font-semibold text-neutral-900 dark:text-neutral-100 flex items-center gap-1.5">
+                    <Database className="w-3.5 h-3.5 text-emerald-500" /> Direct Supabase Connection
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => handleTestDatabase()}
+                    disabled={isTestingDb}
+                    className="px-2 py-1 text-[11px] font-medium rounded border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 hover:bg-neutral-100 dark:hover:bg-neutral-700 text-neutral-800 dark:text-neutral-200 flex items-center gap-1"
+                  >
+                    <RefreshCw className={`w-3 h-3 ${isTestingDb ? 'animate-spin' : ''}`} />
+                    Test Connection
+                  </button>
+                </div>
+                <p className="text-[11px] text-neutral-500 dark:text-neutral-400 leading-relaxed">
+                  Connecting directly from the client ensures instant syncing with zero serverless proxy lag. Ciphertext is always encrypted in your browser before saving.
+                </p>
+              </div>
+
+              {/* Test Result Message */}
+              {dbTestResult && (
+                <div
+                  className={`p-3 rounded-lg border text-xs flex items-start gap-2.5 ${
+                    dbTestResult.success
+                      ? 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-900/50 text-emerald-800 dark:text-emerald-200'
+                      : 'bg-rose-50 dark:bg-rose-950/40 border-rose-200 dark:border-rose-900/50 text-rose-800 dark:text-rose-200'
+                  }`}
+                >
+                  {dbTestResult.success ? (
+                    <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0 mt-0.5" />
+                  ) : (
+                    <XCircle className="w-4 h-4 text-rose-500 shrink-0 mt-0.5" />
+                  )}
+                  <div className="space-y-1">
+                    <p className="font-medium">{dbTestResult.message}</p>
+                    {typeof dbTestResult.notesCount === 'number' && (
+                      <p className="text-[11px] opacity-80">
+                        Total encrypted sync records in table: {dbTestResult.notesCount}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Form fields */}
+              <div className="space-y-3 pt-1">
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-neutral-900 dark:text-neutral-100">
+                    Supabase Project URL
+                  </label>
+                  <input
+                    type="url"
+                    value={dbUrl}
+                    onChange={(e) => setDbUrl(e.target.value)}
+                    placeholder="https://xyzcompany.supabase.co"
+                    className="w-full p-2 text-xs font-mono rounded-md border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-1 focus:ring-black dark:focus:ring-white"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-neutral-900 dark:text-neutral-100">
+                    Supabase Anon Public Key (or Service Key)
+                  </label>
+                  <input
+                    type="password"
+                    value={dbKey}
+                    onChange={(e) => setDbKey(e.target.value)}
+                    placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                    className="w-full p-2 text-xs font-mono rounded-md border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-1 focus:ring-black dark:focus:ring-white"
+                  />
+                  <p className="text-[10px] text-neutral-500">
+                    Your public <code className="font-mono text-[10px]">anon</code> key is safe to use in the client because all notes are zero-knowledge end-to-end encrypted with your private passphrase.
+                  </p>
+                </div>
+
+                <div className="flex gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={handleSaveDatabaseCredentials}
+                    className="flex-1 py-2 text-xs font-medium rounded-md bg-black text-white dark:bg-white dark:text-black hover:opacity-90 transition-opacity flex items-center justify-center gap-1.5"
+                  >
+                    <Check className="w-3.5 h-3.5" /> Save & Connect
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDbUrl('');
+                      setDbKey('');
+                      saveCustomSupabaseConfig('', '');
+                      setDbTestResult(null);
+                    }}
+                    className="px-3 py-2 text-xs font-medium rounded-md border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+                  >
+                    Reset to Default
+                  </button>
+                </div>
+              </div>
+
+              {/* SQL Schema helper */}
+              <div className="p-3.5 rounded-lg border border-neutral-200 dark:border-neutral-800 bg-neutral-50/50 dark:bg-neutral-900/30 space-y-2 text-xs">
+                <div className="flex items-center justify-between">
+                  <span className="font-semibold text-neutral-900 dark:text-neutral-100">
+                    Supabase SQL Setup Query
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => copySqlToClipboard(SQL_SCRIPT)}
+                    className="text-[11px] font-medium text-neutral-600 dark:text-neutral-300 hover:text-black dark:hover:text-white flex items-center gap-1"
+                  >
+                    {copiedSql ? <Check className="w-3 h-3 text-emerald-500" /> : <Copy className="w-3 h-3" />}
+                    {copiedSql ? 'Copied SQL' : 'Copy SQL'}
+                  </button>
+                </div>
+                <pre className="font-mono text-[10px] p-2.5 rounded bg-neutral-900 text-neutral-100 overflow-x-auto leading-relaxed select-all">
+                  {SQL_SCRIPT}
+                </pre>
+              </div>
+            </div>
+          )}
+
           {/* TAB: SETUP / CONNECT */}
           {activeTab === 'setup' && (
             <div className="space-y-4">
               <div className="flex border-b border-neutral-200 dark:border-neutral-800 gap-4 text-xs font-medium">
                 <button
                   onClick={() => setSetupMode('new')}
-                  className={`pb-2 border-b-2 ${
+                  className={`pb-2 border-b-2 transition-colors ${
                     setupMode === 'new'
                       ? 'border-black dark:border-white text-black dark:text-white'
-                      : 'border-transparent text-neutral-500'
+                      : 'border-transparent text-neutral-500 hover:text-black dark:hover:text-white'
                   }`}
                 >
                   Create New Sync Account
                 </button>
                 <button
                   onClick={() => setSetupMode('existing')}
-                  className={`pb-2 border-b-2 ${
+                  className={`pb-2 border-b-2 transition-colors ${
                     setupMode === 'existing'
                       ? 'border-black dark:border-white text-black dark:text-white'
-                      : 'border-transparent text-neutral-500'
+                      : 'border-transparent text-neutral-500 hover:text-black dark:hover:text-white'
                   }`}
                 >
                   Connect with Recovery Phrase
@@ -474,7 +709,7 @@ CREATE TABLE IF NOT EXISTS notes (
                     </p>
 
                     <p className="text-[11px] text-neutral-500 leading-normal">
-                      Write this phrase down or store it in your password manager. Your Master Encryption Key is derived client-side from this phrase and is never sent to Vercel.
+                      Write this phrase down or store it in your password manager. Your Master Encryption Key is derived client-side from this phrase and is never sent to the server.
                     </p>
                   </div>
 

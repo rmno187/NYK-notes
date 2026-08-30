@@ -1,4 +1,5 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import type { VercelRequest } from '@vercel/node';
 
 let cachedClient: SupabaseClient | null = null;
 let lastKeyUsed: string | null = null;
@@ -51,4 +52,27 @@ export function getSupabase(): SupabaseClient | null {
   }
 
   return cachedClient;
+}
+
+export function parseRequestBody(req: VercelRequest | any): any {
+  if (!req || !req.body) return {};
+  if (typeof req.body === 'object') return req.body;
+  if (typeof req.body === 'string') {
+    try {
+      return JSON.parse(req.body);
+    } catch {
+      return {};
+    }
+  }
+  return {};
+}
+
+export function getBearerToken(req: VercelRequest | any): string | null {
+  if (!req || !req.headers) return null;
+  const header = req.headers.authorization || req.headers.Authorization;
+  if (!header || typeof header !== 'string') return null;
+  if (header.startsWith('Bearer ')) {
+    return header.slice(7).trim();
+  }
+  return header.trim();
 }

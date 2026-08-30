@@ -20,6 +20,11 @@ import {
   getPendingPushQueue,
   removePendingPush,
 } from './cache';
+import {
+  getDirectSupabaseClient,
+  pushNotesDirectToSupabase,
+  pullNotesDirectFromSupabase,
+} from './supabaseDirect';
 
 export type SyncStatusListener = (status: SyncStatus, lastSyncedAt?: number, errorMessage?: string | null) => void;
 export type SyncNotesListener = (updatedNotes: Note[]) => void;
@@ -129,33 +134,30 @@ class VercelSyncManager {
     this.encryptionKey = derived.encryptionKey;
     this.authKeyHex = derived.authKeyHex;
 
-    // 2. Authenticate or Register with Vercel API
-    const response = await fetch('/api/sync/auth', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        authKeyHex: derived.authKeyHex,
-        authSalt: derived.authSalt,
-        accountId: existingAccountId,
-      }),
-    });
+    // 2. Deterministic Vault ID based on Auth Key hash or provided accountId
+    let accountId = existingAccountId || 'vault_' + derived.authKeyHex.substring(0, 16);
+    let isNewAccount = !existingAccountId;
 
-    if (!response.ok) {
-      let msg = `Sync authentication failed (HTTP ${response.status})`;
-      try {
-        const errJson = await response.json();
-        if (errJson.error) msg = errJson.error;
-      } catch {
-        const text = await response.text().catch(() => '');
-        if (text) msg = text;
+    // Attempt backend registration if available, but do not block if offline or serverless error
+    try {
+      const response = await fetch('/api/sync/auth', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          authKeyHex: derived.authKeyHex,
+          authSalt: derived.authSalt,
+          accountId: existingAccountId,
+        }),
+      });
+
+      if (response.ok) {
+        const resData = await response.json();
+        if (resData.accountId) accountId = resData.accountId;
+        if (typeof resData.isNew === 'boolean') isNewAccount = resData.isNew;
       }
-      this.setStatus('error', msg);
-      throw new Error(msg);
+    } catch {
+      // Backend not required if direct Supabase is used
     }
-
-    const resData = await response.json();
-    const accountId = resData.accountId;
-    const isNewAccount = resData.isNew;
 
     // 3. Save to isolated local sync storage
     const deviceId = 'dev_' + Math.random().toString(36).substring(2, 10);
@@ -314,6 +316,18 @@ class VercelSyncManager {
     if (!this.config || !this.authKeyHex) return;
 
     try {
+      // 1. Check direct Supabase client first
+      const directSupabase = getDirectSupabaseClient();
+      if (directSupabase) {
+        const directRes = await pushNotesDirectToSupabase(this.config.vaultId, [envelope]);
+        if (directRes.success) {
+          await removePendingPush(envelope.noteId);
+          this.setStatus('synced', null);
+          return;
+        }
+      }
+
+      // 2. Fallback to /api/sync/push
       const response = await fetch('/api/sync/push', {
         method: 'POST',
         headers: {
@@ -340,6 +354,7 @@ class VercelSyncManager {
         this.setStatus('error', msg);
       } else {
         await removePendingPush(envelope.noteId);
+        this.setStatus('synced', null);
       }
     } catch (err: any) {
       await queuePendingPush(envelope);
@@ -362,8 +377,65 @@ class VercelSyncManager {
     this.setStatus('syncing');
 
     try {
-      // 1. Push any queued offline changes
       const pendingEnvelopes = await getPendingPushQueue();
+      const directSupabase = getDirectSupabaseClient();
+
+      // ==========================================
+      // STRATEGY A: DIRECT CLIENT SUPABASE SYNC
+      // ==========================================
+      if (directSupabase) {
+        // 1. Push pending offline envelopes directly
+        if (pendingEnvelopes.length > 0) {
+          const pushResult = await pushNotesDirectToSupabase(this.config.vaultId, pendingEnvelopes);
+          if (!pushResult.success) {
+            throw new Error(pushResult.error || 'Direct Supabase push failed');
+          }
+          for (const env of pendingEnvelopes) {
+            await removePendingPush(env.noteId);
+          }
+        }
+
+        // 2. Pull remote changes directly
+        const pullResult = await pullNotesDirectFromSupabase(this.config.vaultId, this.config.lastSyncedAt || 0);
+        if (!pullResult.success) {
+          throw new Error(pullResult.error || 'Direct Supabase pull failed');
+        }
+
+        const remoteEnvelopes = pullResult.envelopes;
+        if (remoteEnvelopes.length > 0) {
+          const localNotes = await getVercelCacheNotes();
+          const localMap = new Map(localNotes.map((n) => [n.id, n]));
+          let hasChanges = false;
+
+          for (const envelope of remoteEnvelopes) {
+            const local = localMap.get(envelope.noteId);
+            if (local && local.updatedAt > envelope.updatedAt) {
+              continue;
+            }
+
+            const decrypted = await decryptNote(envelope, this.encryptionKey);
+            if (decrypted) {
+              await saveVercelCacheNote(decrypted);
+              localMap.set(decrypted.id, decrypted);
+              hasChanges = true;
+            }
+          }
+
+          if (hasChanges) {
+            const allWorking = Array.from(localMap.values());
+            this.notesListeners.forEach((l) => l(allWorking));
+          }
+        }
+
+        this.config.lastSyncedAt = pullResult.serverTimestamp || Date.now();
+        await setSyncConfigItem('sync_config', this.config);
+        this.setStatus('synced', null);
+        return;
+      }
+
+      // ==========================================
+      // STRATEGY B: SERVERLESS API ROUTE SYNC
+      // ==========================================
       if (pendingEnvelopes.length > 0) {
         const pushRes = await fetch('/api/sync/push', {
           method: 'POST',
@@ -395,7 +467,6 @@ class VercelSyncManager {
         }
       }
 
-      // 2. Pull remote changes
       const pullUrl = `/api/sync/pull?accountId=${encodeURIComponent(
         this.config.accountId
       )}&since=${encodeURIComponent(this.config.lastSyncedAt || 0)}`;
@@ -429,13 +500,10 @@ class VercelSyncManager {
 
         for (const envelope of remoteEnvelopes) {
           const local = localMap.get(envelope.noteId);
-
-          // Conflict check: if local has a newer update time, keep local and will sync later
           if (local && local.updatedAt > envelope.updatedAt) {
             continue;
           }
 
-          // Decrypt incoming remote note (Zero-Knowledge)
           const decrypted = await decryptNote(envelope, this.encryptionKey);
           if (decrypted) {
             await saveVercelCacheNote(decrypted);
@@ -450,7 +518,6 @@ class VercelSyncManager {
         }
       }
 
-      // Update sync watermark
       this.config.lastSyncedAt = serverTimestamp;
       await setSyncConfigItem('sync_config', this.config);
       this.setStatus('synced', null);
