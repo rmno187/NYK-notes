@@ -63,12 +63,21 @@ export async function deriveSyncKeys(
   existingSaltBase64?: string
 ): Promise<DerivedKeys> {
   const enc = new TextEncoder();
-  const passphraseBytes = enc.encode(passphrase.trim());
+  // Normalize passphrase (trim, lowercase, normalize spaces) so typing on different devices matches
+  const normalizedPassphrase = passphrase.trim().toLowerCase().replace(/\s+/g, ' ');
+  const passphraseBytes = enc.encode(normalizedPassphrase);
 
-  // Use existing salt or generate a fresh 32-byte salt
-  const saltBytes = existingSaltBase64
-    ? base64ToBuffer(existingSaltBase64)
-    : generateRandomBytes(32);
+  // Deterministic salt for the recovery phrase:
+  // When connecting across multiple devices with the recovery phrase, we compute a deterministic
+  // domain-separated SHA-256 salt from the phrase so all devices compute the exact same Vault ID and Master Key.
+  let saltBytes: Uint8Array;
+  if (existingSaltBase64) {
+    saltBytes = base64ToBuffer(existingSaltBase64);
+  } else {
+    const domainBytes = enc.encode('offline_markdown_notes_zk_v1:' + normalizedPassphrase);
+    const hash = await window.crypto.subtle.digest('SHA-256', domainBytes);
+    saltBytes = new Uint8Array(hash);
+  }
 
   // Import passphrase as PBKDF2 base key
   const baseKey = await window.crypto.subtle.importKey(

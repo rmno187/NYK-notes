@@ -25,6 +25,7 @@ import {
   pushNotesDirectToSupabase,
   pullNotesDirectFromSupabase,
 } from './supabaseDirect';
+import { getIndexedDBNotes } from '../storage';
 
 export type SyncStatusListener = (status: SyncStatus, lastSyncedAt?: number, errorMessage?: string | null) => void;
 export type SyncNotesListener = (updatedNotes: Note[]) => void;
@@ -121,6 +122,26 @@ class VercelSyncManager {
     }
   }
 
+  // Seed local IndexedDB notes into Vercel cache and pending push queue
+  public async seedLocalNotesToSync(): Promise<void> {
+    if (!this.encryptionKey) return;
+    try {
+      const localIdbNotes = await getIndexedDBNotes();
+      const vercelCache = await getVercelCacheNotes();
+      const vercelIds = new Set(vercelCache.map((n) => n.id));
+
+      for (const note of localIdbNotes) {
+        if (!vercelIds.has(note.id)) {
+          await saveVercelCacheNote(note);
+          const envelope = await encryptNote(note, this.encryptionKey);
+          await queuePendingPush(envelope);
+        }
+      }
+    } catch (err) {
+      console.error('Error seeding local notes to sync:', err);
+    }
+  }
+
   // Setup/Login to a Sync Account using Passphrase or Recovery Phrase
   public async setupWithPassphrase(
     passphrase: string,
@@ -138,7 +159,7 @@ class VercelSyncManager {
     let accountId = existingAccountId || 'vault_' + derived.authKeyHex.substring(0, 16);
     let isNewAccount = !existingAccountId;
 
-    // Attempt backend registration if available, but do not block if offline or serverless error
+    // Attempt backend registration if available, but do not block if offline or direct supabase
     try {
       const response = await fetch('/api/sync/auth', {
         method: 'POST',
@@ -182,10 +203,14 @@ class VercelSyncManager {
 
     this.config = config;
     this.setStatus('synced', null);
+
+    // 4. Seed any existing local notes into sync queue so they are uploaded
+    await this.seedLocalNotesToSync();
+
     this.startAutoSync();
 
-    // Trigger initial full sync pull
-    await this.sync();
+    // 5. Trigger initial full 2-way sync
+    await this.sync(true);
 
     return {
       accountId,
@@ -222,9 +247,11 @@ class VercelSyncManager {
 
     this.config = config;
     this.setStatus('synced', null);
+
+    await this.seedLocalNotesToSync();
     this.startAutoSync();
 
-    await this.sync();
+    await this.sync(true);
   }
 
   // Disconnect / Clear Vercel Sync
@@ -363,7 +390,7 @@ class VercelSyncManager {
   }
 
   // Full 2-Way Sync Operation (Push pending changes, Pull remote changes)
-  public async sync(): Promise<void> {
+  public async sync(forceFullPull = false): Promise<void> {
     if (this.isSyncing || !this.isConfigured() || !this.config || !this.authKeyHex || !this.encryptionKey) {
       return;
     }
@@ -395,8 +422,10 @@ class VercelSyncManager {
           }
         }
 
-        // 2. Pull remote changes directly
-        const pullResult = await pullNotesDirectFromSupabase(this.config.vaultId, this.config.lastSyncedAt || 0);
+        // 2. Pull remote changes directly (pull all if forceFullPull or no local notes)
+        const localBefore = await getVercelCacheNotes();
+        const pullSince = forceFullPull || localBefore.length === 0 ? 0 : this.config.lastSyncedAt || 0;
+        const pullResult = await pullNotesDirectFromSupabase(this.config.vaultId, pullSince);
         if (!pullResult.success) {
           throw new Error(pullResult.error || 'Direct Supabase pull failed');
         }
@@ -421,8 +450,8 @@ class VercelSyncManager {
             }
           }
 
-          if (hasChanges) {
-            const allWorking = Array.from(localMap.values());
+          const allWorking = Array.from(localMap.values());
+          if (hasChanges || localNotes.length === 0) {
             this.notesListeners.forEach((l) => l(allWorking));
           }
         }
@@ -469,7 +498,7 @@ class VercelSyncManager {
 
       const pullUrl = `/api/sync/pull?accountId=${encodeURIComponent(
         this.config.accountId
-      )}&since=${encodeURIComponent(this.config.lastSyncedAt || 0)}`;
+      )}&since=${encodeURIComponent(forceFullPull ? 0 : this.config.lastSyncedAt || 0)}`;
 
       const pullRes = await fetch(pullUrl, {
         headers: {
@@ -512,8 +541,8 @@ class VercelSyncManager {
           }
         }
 
-        if (hasChanges) {
-          const allWorking = Array.from(localMap.values());
+        const allWorking = Array.from(localMap.values());
+        if (hasChanges || localNotes.length === 0) {
           this.notesListeners.forEach((l) => l(allWorking));
         }
       }

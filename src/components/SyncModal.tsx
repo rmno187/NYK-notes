@@ -188,7 +188,7 @@ export const SyncModal: React.FC<SyncModalProps> = ({
   };
 
   const handleManualSyncNow = async () => {
-    await syncManager.sync();
+    await syncManager.sync(true);
   };
 
   // Start Device Pairing (Device A)
@@ -515,8 +515,8 @@ NOTIFY pgrst, 'reload schema';`;
                 </h4>
                 <div className="p-3.5 rounded-lg border border-neutral-200 dark:border-neutral-800 space-y-2 text-xs">
                   <div className="flex justify-between py-1 border-b border-neutral-100 dark:border-neutral-900">
-                    <span className="text-neutral-500">Account ID</span>
-                    <span className="font-mono text-neutral-800 dark:text-neutral-200">{config?.accountId}</span>
+                    <span className="text-neutral-500">Vault ID</span>
+                    <span className="font-mono font-medium text-emerald-600 dark:text-emerald-400">{config?.vaultId || config?.accountId}</span>
                   </div>
                   <div className="flex justify-between py-1 border-b border-neutral-100 dark:border-neutral-900">
                     <span className="text-neutral-500">Device ID</span>
