@@ -59,6 +59,61 @@ interface EditorPaneProps {
   onOpenShortcutsModal?: () => void;
 }
 
+function getCaretCharacterOffsetWithin(element: HTMLElement): number {
+  let caretOffset = 0;
+  const sel = window.getSelection();
+  if (sel && sel.rangeCount > 0) {
+    const range = sel.getRangeAt(0);
+    const preCaretRange = range.cloneRange();
+    preCaretRange.selectNodeContents(element);
+    try {
+      preCaretRange.setEnd(range.endContainer, range.endOffset);
+      caretOffset = preCaretRange.toString().length;
+    } catch {
+      caretOffset = element.textContent?.length || 0;
+    }
+  }
+  return caretOffset;
+}
+
+function setCaretCharacterOffsetWithin(element: HTMLElement, offset: number) {
+  const sel = window.getSelection();
+  if (!sel) return;
+  const range = document.createRange();
+  range.selectNodeContents(element);
+  range.collapse(true);
+
+  let currentOffset = 0;
+  const nodeStack: Node[] = [element];
+  let found = false;
+
+  while (nodeStack.length > 0) {
+    const node = nodeStack.pop()!;
+    if (node.nodeType === Node.TEXT_NODE) {
+      const nodeLength = node.textContent?.length || 0;
+      if (currentOffset + nodeLength >= offset) {
+        range.setStart(node, Math.min(Math.max(0, offset - currentOffset), nodeLength));
+        range.collapse(true);
+        found = true;
+        break;
+      }
+      currentOffset += nodeLength;
+    } else {
+      for (let i = node.childNodes.length - 1; i >= 0; i--) {
+        nodeStack.push(node.childNodes[i]);
+      }
+    }
+  }
+
+  if (!found) {
+    range.selectNodeContents(element);
+    range.collapse(false);
+  }
+
+  sel.removeAllRanges();
+  sel.addRange(range);
+}
+
 export const EditorPane: React.FC<EditorPaneProps> = ({
   note,
   onChangeTitle,
@@ -148,6 +203,8 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
       const isDifferentNote = prevNoteIdForHtmlRef.current !== note.id;
       prevNoteIdForHtmlRef.current = note.id;
 
+      if (isUndoRedoActionRef.current) return;
+
       const html = renderMarkdownToHtml(note.content);
       // Avoid overwriting if user is actively typing in wysiwyg on the SAME note,
       // but ALWAYS force update innerHTML when switching to a different note.
@@ -200,170 +257,6 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
       return () => clearTimeout(timer);
     }
   }, [note.id, note.title, note.content, focusContent]);
-
-  // History stack for exact Undo/Redo
-  const historyRef = useRef<{ content: string; selStart: number; selEnd: number }[]>([
-    { content: note.content, selStart: 0, selEnd: 0 },
-  ]);
-  const historyIdxRef = useRef<number>(0);
-  const isUndoRedoActionRef = useRef<boolean>(false);
-  const prevNoteIdForHistoryRef = useRef<string>(note.id);
-
-  useEffect(() => {
-    if (prevNoteIdForHistoryRef.current !== note.id) {
-      prevNoteIdForHistoryRef.current = note.id;
-      historyRef.current = [{ content: note.content, selStart: 0, selEnd: 0 }];
-      historyIdxRef.current = 0;
-    }
-  }, [note.id, note.content]);
-
-  const pushHistory = useCallback((newContent: string, selStart?: number, selEnd?: number) => {
-    if (isUndoRedoActionRef.current) return;
-    const current = historyRef.current[historyIdxRef.current];
-    if (current && current.content === newContent) return;
-
-    let sStart = selStart;
-    let sEnd = selEnd;
-    if (sStart === undefined || sEnd === undefined) {
-      if (textareaRef.current) {
-        sStart = textareaRef.current.selectionStart;
-        sEnd = textareaRef.current.selectionEnd;
-      } else {
-        sStart = newContent.length;
-        sEnd = newContent.length;
-      }
-    }
-
-    const trimmed = historyRef.current.slice(0, historyIdxRef.current + 1);
-    trimmed.push({ content: newContent, selStart: sStart, selEnd: sEnd });
-    if (trimmed.length > 150) trimmed.shift();
-    historyRef.current = trimmed;
-    historyIdxRef.current = trimmed.length - 1;
-  }, []);
-
-  const handleUndo = useCallback(() => {
-    if (mode === 'wysiwyg' && wysiwygRef.current) {
-      wysiwygRef.current.focus();
-      if (document.queryCommandSupported('undo') && document.execCommand('undo', false)) {
-        handleWysiwygInput();
-        return;
-      }
-    }
-    if (mode === 'markdown' && textareaRef.current) {
-      textareaRef.current.focus();
-      if (document.queryCommandSupported('undo') && document.execCommand('undo', false)) {
-        return;
-      }
-    }
-
-    if (historyIdxRef.current > 0) {
-      isUndoRedoActionRef.current = true;
-      historyIdxRef.current -= 1;
-      const target = historyRef.current[historyIdxRef.current];
-      onChangeContent(target.content);
-
-      if (mode === 'wysiwyg' && wysiwygRef.current) {
-        wysiwygRef.current.innerHTML = renderMarkdownToHtml(target.content) || '<p><br></p>';
-      }
-
-      setTimeout(() => {
-        if (mode === 'markdown' && textareaRef.current) {
-          textareaRef.current.focus();
-          textareaRef.current.setSelectionRange(target.selStart, target.selEnd);
-        } else if (mode === 'wysiwyg' && wysiwygRef.current) {
-          wysiwygRef.current.focus();
-        }
-        isUndoRedoActionRef.current = false;
-      }, 0);
-    }
-  }, [onChangeContent, mode]);
-
-  const handleRedo = useCallback(() => {
-    if (mode === 'wysiwyg' && wysiwygRef.current) {
-      wysiwygRef.current.focus();
-      if (document.queryCommandSupported('redo') && document.execCommand('redo', false)) {
-        handleWysiwygInput();
-        return;
-      }
-    }
-    if (mode === 'markdown' && textareaRef.current) {
-      textareaRef.current.focus();
-      if (document.queryCommandSupported('redo') && document.execCommand('redo', false)) {
-        return;
-      }
-    }
-
-    if (historyIdxRef.current < historyRef.current.length - 1) {
-      isUndoRedoActionRef.current = true;
-      historyIdxRef.current += 1;
-      const target = historyRef.current[historyIdxRef.current];
-      onChangeContent(target.content);
-
-      if (mode === 'wysiwyg' && wysiwygRef.current) {
-        wysiwygRef.current.innerHTML = renderMarkdownToHtml(target.content) || '<p><br></p>';
-      }
-
-      setTimeout(() => {
-        if (mode === 'markdown' && textareaRef.current) {
-          textareaRef.current.focus();
-          textareaRef.current.setSelectionRange(target.selStart, target.selEnd);
-        } else if (mode === 'wysiwyg' && wysiwygRef.current) {
-          wysiwygRef.current.focus();
-        }
-        isUndoRedoActionRef.current = false;
-      }, 0);
-    }
-  }, [onChangeContent, mode]);
-
-  // Handle direct editing in WYSIWYG contentEditable div
-  const handleWysiwygInput = useCallback(() => {
-    if (!wysiwygRef.current) return;
-    const html = wysiwygRef.current.innerHTML;
-    const markdown = convertHtmlToMarkdown(html);
-    pushHistory(markdown);
-    onChangeContent(markdown);
-  }, [onChangeContent, pushHistory]);
-
-  // Handle interactive clicks inside WYSIWYG (e.g., checking/unchecking task checkboxes)
-  const handleWysiwygClick = useCallback(
-    (e: React.MouseEvent<HTMLDivElement>) => {
-      const target = e.target as HTMLElement;
-      if (target.tagName === 'INPUT' && (target as HTMLInputElement).type === 'checkbox') {
-        const cb = target as HTMLInputElement;
-        const isCheckedAttr = cb.hasAttribute('checked');
-
-        // Ensure checked state and attribute are in sync
-        if (cb.checked !== isCheckedAttr) {
-          if (cb.checked) {
-            cb.setAttribute('checked', 'checked');
-          } else {
-            cb.removeAttribute('checked');
-          }
-        } else {
-          // If browser contenteditable suppressed automatic toggle, toggle manually
-          cb.checked = !cb.checked;
-          if (cb.checked) {
-            cb.setAttribute('checked', 'checked');
-          } else {
-            cb.removeAttribute('checked');
-          }
-        }
-
-        if (wysiwygRef.current) {
-          const html = wysiwygRef.current.innerHTML;
-          const markdown = convertHtmlToMarkdown(html);
-          onChangeContent(markdown);
-        }
-      }
-    },
-    [onChangeContent]
-  );
-
-  const [isLinkModalOpen, setIsLinkModalOpen] = useState(false);
-  const [linkUrl, setLinkUrl] = useState('');
-  const [linkText, setLinkText] = useState('');
-  const [savedRange, setSavedRange] = useState<Range | null>(null);
-  const [savedTextareaSel, setSavedTextareaSel] = useState<{ start: number; end: number } | null>(null);
 
   // Helper to find block node and check if cursor is at start
   const getCaretBlockAndOffset = useCallback((container: HTMLElement) => {
@@ -486,6 +379,175 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
       link: isLink,
     });
   }, [mode]);
+
+  // History stack for exact granular Undo/Redo (character-by-character and edit-by-edit)
+  interface HistoryItem {
+    content: string;
+    html?: string;
+    selStart: number;
+    selEnd: number;
+  }
+
+  const historyRef = useRef<HistoryItem[]>([
+    { content: note.content, selStart: 0, selEnd: 0, html: renderMarkdownToHtml(note.content) },
+  ]);
+  const historyIdxRef = useRef<number>(0);
+  const isUndoRedoActionRef = useRef<boolean>(false);
+  const prevNoteIdForHistoryRef = useRef<string>(note.id);
+
+  useEffect(() => {
+    if (prevNoteIdForHistoryRef.current !== note.id) {
+      prevNoteIdForHistoryRef.current = note.id;
+      historyRef.current = [
+        {
+          content: note.content,
+          selStart: 0,
+          selEnd: 0,
+          html: renderMarkdownToHtml(note.content),
+        },
+      ];
+      historyIdxRef.current = 0;
+    }
+  }, [note.id]);
+
+  const pushHistory = useCallback(
+    (newContent: string, selStart?: number, selEnd?: number, customHtml?: string) => {
+      if (isUndoRedoActionRef.current) return;
+      const current = historyRef.current[historyIdxRef.current];
+      if (current && current.content === newContent) return;
+
+      let sStart = selStart;
+      let sEnd = selEnd;
+      if (sStart === undefined || sEnd === undefined) {
+        if (mode === 'markdown' && textareaRef.current) {
+          sStart = textareaRef.current.selectionStart;
+          sEnd = textareaRef.current.selectionEnd;
+        } else if (mode === 'wysiwyg' && wysiwygRef.current) {
+          const offset = getCaretCharacterOffsetWithin(wysiwygRef.current);
+          sStart = offset;
+          sEnd = offset;
+        } else {
+          sStart = newContent.length;
+          sEnd = newContent.length;
+        }
+      }
+
+      const htmlToStore = customHtml || (wysiwygRef.current ? wysiwygRef.current.innerHTML : undefined);
+
+      const trimmed = historyRef.current.slice(0, historyIdxRef.current + 1);
+      trimmed.push({
+        content: newContent,
+        selStart: sStart,
+        selEnd: sEnd,
+        html: htmlToStore,
+      });
+      if (trimmed.length > 500) trimmed.shift();
+      historyRef.current = trimmed;
+      historyIdxRef.current = trimmed.length - 1;
+    },
+    [mode]
+  );
+
+  const handleUndo = useCallback(() => {
+    if (historyIdxRef.current > 0) {
+      isUndoRedoActionRef.current = true;
+      historyIdxRef.current -= 1;
+      const target = historyRef.current[historyIdxRef.current];
+      onChangeContent(target.content);
+
+      if (mode === 'wysiwyg' && wysiwygRef.current) {
+        const htmlToSet = target.html || renderMarkdownToHtml(target.content) || '<p><br></p>';
+        wysiwygRef.current.innerHTML = htmlToSet;
+        wysiwygRef.current.focus();
+        setCaretCharacterOffsetWithin(wysiwygRef.current, target.selStart);
+        checkActiveFormats();
+      } else if (mode === 'markdown' && textareaRef.current) {
+        textareaRef.current.value = target.content;
+        textareaRef.current.focus();
+        textareaRef.current.setSelectionRange(target.selStart, target.selEnd);
+      }
+
+      setTimeout(() => {
+        isUndoRedoActionRef.current = false;
+      }, 0);
+    }
+  }, [onChangeContent, mode, checkActiveFormats]);
+
+  const handleRedo = useCallback(() => {
+    if (historyIdxRef.current < historyRef.current.length - 1) {
+      isUndoRedoActionRef.current = true;
+      historyIdxRef.current += 1;
+      const target = historyRef.current[historyIdxRef.current];
+      onChangeContent(target.content);
+
+      if (mode === 'wysiwyg' && wysiwygRef.current) {
+        const htmlToSet = target.html || renderMarkdownToHtml(target.content) || '<p><br></p>';
+        wysiwygRef.current.innerHTML = htmlToSet;
+        wysiwygRef.current.focus();
+        setCaretCharacterOffsetWithin(wysiwygRef.current, target.selStart);
+        checkActiveFormats();
+      } else if (mode === 'markdown' && textareaRef.current) {
+        textareaRef.current.value = target.content;
+        textareaRef.current.focus();
+        textareaRef.current.setSelectionRange(target.selStart, target.selEnd);
+      }
+
+      setTimeout(() => {
+        isUndoRedoActionRef.current = false;
+      }, 0);
+    }
+  }, [onChangeContent, mode, checkActiveFormats]);
+
+  // Handle direct editing in WYSIWYG contentEditable div
+  const handleWysiwygInput = useCallback(() => {
+    if (!wysiwygRef.current) return;
+    const html = wysiwygRef.current.innerHTML;
+    const markdown = convertHtmlToMarkdown(html);
+    const offset = getCaretCharacterOffsetWithin(wysiwygRef.current);
+    pushHistory(markdown, offset, offset, html);
+    onChangeContent(markdown);
+  }, [onChangeContent, pushHistory]);
+
+  // Handle interactive clicks inside WYSIWYG (e.g., checking/unchecking task checkboxes)
+  const handleWysiwygClick = useCallback(
+    (e: React.MouseEvent<HTMLDivElement>) => {
+      const target = e.target as HTMLElement;
+      if (target.tagName === 'INPUT' && (target as HTMLInputElement).type === 'checkbox') {
+        const cb = target as HTMLInputElement;
+        const isCheckedAttr = cb.hasAttribute('checked');
+
+        // Ensure checked state and attribute are in sync
+        if (cb.checked !== isCheckedAttr) {
+          if (cb.checked) {
+            cb.setAttribute('checked', 'checked');
+          } else {
+            cb.removeAttribute('checked');
+          }
+        } else {
+          // If browser contenteditable suppressed automatic toggle, toggle manually
+          cb.checked = !cb.checked;
+          if (cb.checked) {
+            cb.setAttribute('checked', 'checked');
+          } else {
+            cb.removeAttribute('checked');
+          }
+        }
+
+        if (wysiwygRef.current) {
+          const html = wysiwygRef.current.innerHTML;
+          const markdown = convertHtmlToMarkdown(html);
+          onChangeContent(markdown);
+        }
+      }
+    },
+    [onChangeContent]
+  );
+
+  const [isLinkModalOpen, setIsLinkModalOpen] = useState(false);
+  const [linkUrl, setLinkUrl] = useState('');
+  const [linkText, setLinkText] = useState('');
+  const [savedRange, setSavedRange] = useState<Range | null>(null);
+  const [savedTextareaSel, setSavedTextareaSel] = useState<{ start: number; end: number } | null>(null);
 
   // Sync selection changes to update active button styles
   useEffect(() => {
@@ -938,9 +1000,28 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
     setIsLinkModalOpen(false);
   };
 
-  // Handle key presses inside WYSIWYG editor (Enter clearing styles, Backspace breaking away styles)
+  // Handle key presses inside WYSIWYG editor (Enter clearing styles, Backspace breaking away styles, Undo/Redo)
   const handleWysiwygKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
     if (!wysiwygRef.current) return;
+
+    const isCmdOrCtrl = e.metaKey || e.ctrlKey;
+    const keyLower = e.key.toLowerCase();
+
+    if (isCmdOrCtrl && keyLower === 'z') {
+      e.preventDefault();
+      if (e.shiftKey) {
+        handleRedo();
+      } else {
+        handleUndo();
+      }
+      return;
+    }
+
+    if (isCmdOrCtrl && keyLower === 'y') {
+      e.preventDefault();
+      handleRedo();
+      return;
+    }
 
     if (e.key === 'Tab') {
       e.preventDefault();
@@ -1306,6 +1387,22 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
   const handleKeyDownMarkdown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     const isCmdOrCtrl = e.metaKey || e.ctrlKey;
     const keyLower = e.key.toLowerCase();
+
+    if (isCmdOrCtrl && keyLower === 'z') {
+      e.preventDefault();
+      if (e.shiftKey) {
+        handleRedo();
+      } else {
+        handleUndo();
+      }
+      return;
+    }
+
+    if (isCmdOrCtrl && keyLower === 'y') {
+      e.preventDefault();
+      handleRedo();
+      return;
+    }
 
     if (isCmdOrCtrl) {
       if (keyLower === 'b') {
