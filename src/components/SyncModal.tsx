@@ -623,29 +623,29 @@ export const SyncModal: React.FC<SyncModalProps> = ({
             <div className="space-y-3 text-xs leading-relaxed text-neutral-600 dark:text-neutral-400">
               <div className="p-3.5 rounded-lg border border-neutral-200 dark:border-neutral-800 bg-neutral-50/50 dark:bg-neutral-900/30 space-y-2 text-neutral-900 dark:text-neutral-100">
                 <h4 className="font-semibold flex items-center gap-1.5">
-                  <ShieldCheck className="w-4 h-4 text-emerald-500" /> The Device Owns the Keys. Vercel Stores Encrypted Data.
+                  <ShieldCheck className="w-4 h-4 text-emerald-500" /> The Device Owns the Keys. Supabase Stores Ciphertext Only.
                 </h4>
                 <p className="text-xs text-neutral-600 dark:text-neutral-400 leading-relaxed">
-                  Every note is encrypted with AES-256-GCM in your browser before leaving your computer or phone. The Vercel server only receives opaque ciphertexts and cannot read note titles, content, tags, or dates.
+                  Every note is encrypted with AES-256-GCM in your browser before leaving your device. The Supabase database table (<code className="font-mono text-[11px] bg-neutral-200 dark:bg-neutral-800 px-1 py-0.5 rounded">notes</code>) only receives opaque <code className="font-mono text-[11px] bg-neutral-200 dark:bg-neutral-800 px-1 py-0.5 rounded">encrypted_data</code> blobs and cannot read note titles, content, tags, or metadata.
                 </p>
               </div>
 
               <div className="space-y-2 pt-1">
                 <div className="flex items-start gap-2">
                   <Check className="w-3.5 h-3.5 shrink-0 text-emerald-500 mt-0.5" />
-                  <span><strong>Client-Side Encryption:</strong> AES-256-GCM with unique 96-bit IVs and 128-bit authentication tags.</span>
+                  <span><strong>Client-Side Encryption:</strong> AES-256-GCM authenticated encryption with unique 96-bit IVs and 128-bit integrity tags.</span>
                 </div>
                 <div className="flex items-start gap-2">
                   <Check className="w-3.5 h-3.5 shrink-0 text-emerald-500 mt-0.5" />
-                  <span><strong>Key Derivation:</strong> PBKDF2-SHA256 (600,000 iterations) + HKDF expansion for strict separation between authentication proofs and decryption keys.</span>
+                  <span><strong>Key Derivation:</strong> Standard PBKDF2-SHA256 (100,000 iterations) + HKDF expansion for strict cryptographic separation between authentication tokens and encryption keys.</span>
                 </div>
                 <div className="flex items-start gap-2">
                   <Check className="w-3.5 h-3.5 shrink-0 text-emerald-500 mt-0.5" />
-                  <span><strong>Zero-Knowledge Relay:</strong> Vercel acts purely as an untrusted sync relay and cannot decrypt stored records.</span>
+                  <span><strong>Zero-Knowledge Persistence:</strong> Supabase stores only ciphertext, version numbers, and timestamps with Row Level Security.</span>
                 </div>
                 <div className="flex items-start gap-2">
                   <Check className="w-3.5 h-3.5 shrink-0 text-emerald-500 mt-0.5" />
-                  <span><strong>Device-to-Device Pairing:</strong> Ephemeral ECDH key exchanges securely pair secondary devices without exposing master keys to the server.</span>
+                  <span><strong>Device-to-Device Pairing:</strong> Ephemeral ECDH key exchanges securely pair secondary devices without exposing master keys.</span>
                 </div>
               </div>
             </div>

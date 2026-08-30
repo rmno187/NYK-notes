@@ -160,7 +160,7 @@ export const DirectorySelectorModal: React.FC<DirectorySelectorModalProps> = ({
                   </div>
 
                   <p className="mt-1 text-xs leading-relaxed text-neutral-500 dark:text-neutral-400 max-w-md">
-                    Stored in a folder on this device.
+                    Stored as Markdown files in a folder on this device.
                   </p>
 
                   {currentMode === 'filesystem' && directoryName && (

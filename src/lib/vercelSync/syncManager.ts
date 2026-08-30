@@ -150,6 +150,7 @@ class VercelSyncManager {
         : 'Desktop Browser') + ` (${deviceId.slice(-4)})`;
 
     const config: VercelSyncConfig = {
+      vaultId: accountId,
       accountId,
       authSalt: derived.authSalt,
       deviceId,
@@ -189,6 +190,7 @@ class VercelSyncManager {
 
     const deviceId = 'dev_' + Math.random().toString(36).substring(2, 10);
     const config: VercelSyncConfig = {
+      vaultId: accountId,
       accountId,
       authSalt,
       deviceId,

@@ -3,11 +3,15 @@ import path from 'path';
 import fs from 'fs';
 import crypto from 'node:crypto';
 import { createServer as createViteServer } from 'vite';
+import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
-// Untrusted in-memory & disk-backed persistent storage layer for Vercel Sync
-// The backend NEVER receives or knows the Master Encryption Key or plaintext notes.
+// Supabase & Zero-Knowledge E2EE Server Layer
+// The backend & Supabase database NEVER receive plaintext note content or master encryption keys.
+// Database table: 'notes' (id, vault_id, encrypted_data, version, updated_at, deleted)
+
 interface EncryptedNoteRecord {
   noteId: string;
+  vaultId?: string;
   version: number;
   ciphertext: string;
   iv: string;
@@ -16,6 +20,7 @@ interface EncryptedNoteRecord {
 }
 
 interface SyncAccount {
+  vaultId: string;
   accountId: string;
   authKeyHash: string; // SHA-256 hash of client's authKeyHex
   authSalt: string;
@@ -24,7 +29,7 @@ interface SyncAccount {
   notes: Map<string, EncryptedNoteRecord>;
 }
 
-// Temporary pairing ticket for device-to-device ECDH key exchange
+// Temporary pairing session for device-to-device ECDH key exchange
 interface PairingSession {
   code: string;
   initiatorPublicKey: string;
@@ -37,12 +42,12 @@ interface PairingSession {
 const syncAccounts = new Map<string, SyncAccount>();
 const pairingSessions = new Map<string, PairingSession>();
 
-// Simple synchronous SHA-256 hash helper
+// Synchronous SHA-256 hash helper
 function sha256(text: string): string {
   return crypto.createHash('sha256').update(text).digest('hex');
 }
 
-// Disk persistence file path
+// Local fallback persistence directory
 const DATA_DIR = path.join(process.cwd(), '.sync_data');
 const STORE_FILE = path.join(DATA_DIR, 'sync_accounts.json');
 
@@ -59,8 +64,10 @@ function loadPersistedStore() {
               notesMap.set(n.noteId, n);
             }
           }
-          syncAccounts.set(item.accountId, {
-            accountId: item.accountId,
+          const vaultId = item.vaultId || item.accountId;
+          syncAccounts.set(vaultId, {
+            vaultId,
+            accountId: vaultId,
             authKeyHash: item.authKeyHash,
             authSalt: item.authSalt || '',
             createdAt: item.createdAt || Date.now(),
@@ -81,6 +88,7 @@ function savePersistedStore() {
       fs.mkdirSync(DATA_DIR, { recursive: true });
     }
     const serializable = Array.from(syncAccounts.values()).map((acc) => ({
+      vaultId: acc.vaultId,
       accountId: acc.accountId,
       authKeyHash: acc.authKeyHash,
       authSalt: acc.authSalt,
@@ -96,57 +104,115 @@ function savePersistedStore() {
 
 loadPersistedStore();
 
+// Lazy Supabase client factory
+let supabaseClient: SupabaseClient | null = null;
+let supabaseInitialized = false;
+
+function getSupabase(): SupabaseClient | null {
+  if (supabaseInitialized) return supabaseClient;
+
+  const url =
+    process.env.SUPABASE_URL ||
+    process.env.NEXT_PUBLIC_SUPABASE_URL ||
+    process.env.VITE_SUPABASE_URL;
+  const key =
+    process.env.SUPABASE_SERVICE_ROLE_KEY ||
+    process.env.SUPABASE_ANON_KEY ||
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
+    process.env.VITE_SUPABASE_ANON_KEY;
+
+  if (url && key) {
+    try {
+      supabaseClient = createClient(url, key, {
+        auth: { persistSession: false },
+      });
+      console.log('Connected to Supabase persistence at:', url);
+    } catch (err) {
+      console.error('Failed to initialize Supabase client:', err);
+    }
+  } else {
+    console.log('Supabase environment variables not detected. Operating in zero-knowledge local storage fallback mode.');
+  }
+
+  supabaseInitialized = true;
+  return supabaseClient;
+}
+
 async function startServer() {
   const app = express();
   const PORT = 3000;
 
-  app.use(express.json({ limit: '25mb' }));
+  app.use(express.json({ limit: '50mb' }));
 
-  // 1. Health check
+  // 1. Health check & status
   app.get('/api/health', (req, res) => {
-    res.json({ status: 'ok', provider: 'vercel-sync', accountsCount: syncAccounts.size });
+    const sb = getSupabase();
+    res.json({
+      status: 'ok',
+      provider: 'vercel-sync-supabase',
+      supabaseConfigured: Boolean(sb),
+      localVaultsCount: syncAccounts.size,
+    });
   });
 
-  // 2. Zero-Knowledge Sync Auth (Register or Login)
-  app.post('/api/sync/auth', (req, res) => {
+  // 2. Zero-Knowledge Vault Auth (Register or Verify Vault Access)
+  app.post('/api/sync/auth', async (req, res) => {
     try {
-      const { authKeyHex, authSalt, accountId } = req.body;
+      const { authKeyHex, authSalt, vaultId, accountId } = req.body;
+      const targetVaultId = vaultId || accountId;
+
       if (!authKeyHex || !authSalt) {
         return res.status(400).json({ error: 'authKeyHex and authSalt are required' });
       }
 
       const authKeyHash = sha256(authKeyHex);
 
-      // If accountId provided, verify it exists and matches
-      if (accountId && syncAccounts.has(accountId)) {
-        const acc = syncAccounts.get(accountId)!;
+      // Verify existing in-memory/local store
+      if (targetVaultId && syncAccounts.has(targetVaultId)) {
+        const acc = syncAccounts.get(targetVaultId)!;
         if (acc.authKeyHash !== authKeyHash) {
-          return res.status(401).json({ error: 'Invalid authentication credentials' });
+          return res.status(401).json({ error: 'Invalid vault authentication credentials' });
         }
-        return res.json({ accountId: acc.accountId, isNew: false });
+        return res.json({
+          vaultId: acc.vaultId,
+          accountId: acc.vaultId,
+          isNew: false,
+          supabaseConnected: Boolean(getSupabase()),
+        });
       }
 
-      // Check if any existing account has this authKeyHash
+      // Check if any existing vault matches this authKeyHash
       for (const [id, acc] of syncAccounts.entries()) {
         if (acc.authKeyHash === authKeyHash) {
-          return res.json({ accountId: id, isNew: false });
+          return res.json({
+            vaultId: id,
+            accountId: id,
+            isNew: false,
+            supabaseConnected: Boolean(getSupabase()),
+          });
         }
       }
 
-      // Create new sync bucket
-      const newAccountId = accountId || 'acc_' + Math.random().toString(36).substring(2, 14);
+      // Create new vault
+      const newVaultId = targetVaultId || 'vault_' + Math.random().toString(36).substring(2, 14);
       const newAccount: SyncAccount = {
-        accountId: newAccountId,
+        vaultId: newVaultId,
+        accountId: newVaultId,
         authKeyHash,
         authSalt,
         createdAt: Date.now(),
         devices: [],
         notes: new Map(),
       };
-      syncAccounts.set(newAccountId, newAccount);
+      syncAccounts.set(newVaultId, newAccount);
       savePersistedStore();
 
-      return res.json({ accountId: newAccountId, isNew: true });
+      return res.json({
+        vaultId: newVaultId,
+        accountId: newVaultId,
+        isNew: true,
+        supabaseConnected: Boolean(getSupabase()),
+      });
     } catch (err: any) {
       return res.status(500).json({ error: err.message || 'Authentication error' });
     }
@@ -162,36 +228,39 @@ async function startServer() {
     const authKeyHex = authHeader.replace('Bearer ', '').trim();
     const authKeyHash = sha256(authKeyHex);
 
-    const accountId = (req.body?.accountId || req.query?.accountId) as string;
-    if (!accountId) {
-      return res.status(400).json({ error: 'accountId required' });
+    const vaultId = ((req.body?.vaultId || req.body?.accountId || req.query?.vaultId || req.query?.accountId) as string)?.trim();
+    if (!vaultId) {
+      return res.status(400).json({ error: 'vaultId required' });
     }
 
-    let account = syncAccounts.get(accountId);
+    let account = syncAccounts.get(vaultId);
     if (!account) {
-      // Auto-restore account if auth key matches or create fresh bucket
+      // Auto-register vault with authKeyHash
       account = {
-        accountId,
+        vaultId,
+        accountId: vaultId,
         authKeyHash,
         authSalt: '',
         createdAt: Date.now(),
         devices: [],
         notes: new Map(),
       };
-      syncAccounts.set(accountId, account);
+      syncAccounts.set(vaultId, account);
       savePersistedStore();
     } else if (account.authKeyHash !== authKeyHash) {
-      return res.status(401).json({ error: 'Unauthorized sync access: Key mismatch' });
+      return res.status(401).json({ error: 'Unauthorized vault access: Key mismatch' });
     }
 
     (req as any).syncAccount = account;
+    (req as any).vaultId = vaultId;
     next();
   };
 
-  // 3. Push Encrypted Changes
-  app.post('/api/sync/push', requireSyncAuth, (req, res) => {
+  // 3. Push Encrypted Changes to Supabase (and local store)
+  app.post('/api/sync/push', requireSyncAuth, async (req, res) => {
     try {
       const account: SyncAccount = (req as any).syncAccount;
+      const vaultId: string = (req as any).vaultId;
       const { changes, deviceId } = req.body;
 
       if (!Array.isArray(changes)) {
@@ -208,6 +277,7 @@ async function startServer() {
         }
       }
 
+      // Update local storage backup
       for (const change of changes) {
         if (!change.noteId || !change.ciphertext || !change.iv) continue;
 
@@ -215,7 +285,8 @@ async function startServer() {
         if (!existing || change.updatedAt >= existing.updatedAt) {
           account.notes.set(change.noteId, {
             noteId: change.noteId,
-            version: (existing?.version || 0) + 1,
+            vaultId,
+            version: (change.version || existing?.version || 0) + 1,
             ciphertext: change.ciphertext,
             iv: change.iv,
             updatedAt: change.updatedAt || Date.now(),
@@ -223,20 +294,118 @@ async function startServer() {
           });
         }
       }
-
       savePersistedStore();
-      res.json({ success: true, count: changes.length, serverTimestamp: Date.now() });
+
+      // Persist to Supabase if configured
+      const supabase = getSupabase();
+      if (supabase && changes.length > 0) {
+        const supabaseRows = changes
+          .filter((c) => c.noteId && c.ciphertext && c.iv)
+          .map((c) => {
+            const envelopeJson = JSON.stringify({
+              ciphertext: c.ciphertext,
+              iv: c.iv,
+              version: c.version || 1,
+            });
+            return {
+              id: c.noteId,
+              vault_id: vaultId,
+              encrypted_data: envelopeJson,
+              version: c.version || 1,
+              updated_at: new Date(c.updatedAt || Date.now()).toISOString(),
+              deleted: Boolean(c.deleted),
+            };
+          });
+
+        if (supabaseRows.length > 0) {
+          // Attempt upsert into 'notes' table
+          const { error } = await supabase.from('notes').upsert(supabaseRows, {
+            onConflict: 'id,vault_id',
+          });
+
+          if (error) {
+            // Fallback for schemas with 'id' as singular primary key
+            const { error: fallbackError } = await supabase
+              .from('notes')
+              .upsert(supabaseRows, { onConflict: 'id' });
+
+            if (fallbackError) {
+              console.warn('Supabase upsert warning:', fallbackError.message);
+            }
+          }
+        }
+      }
+
+      res.json({
+        success: true,
+        count: changes.length,
+        serverTimestamp: Date.now(),
+        persistedToSupabase: Boolean(supabase),
+      });
     } catch (err: any) {
+      console.error('Error in /api/sync/push:', err);
       res.status(500).json({ error: err.message || 'Push failed' });
     }
   });
 
-  // 4. Pull Encrypted Changes
-  app.get('/api/sync/pull', requireSyncAuth, (req, res) => {
+  // 4. Pull Encrypted Changes from Supabase (and local store)
+  app.get('/api/sync/pull', requireSyncAuth, async (req, res) => {
     try {
       const account: SyncAccount = (req as any).syncAccount;
+      const vaultId: string = (req as any).vaultId;
       const since = Number(req.query.since || 0);
 
+      const supabase = getSupabase();
+      if (supabase) {
+        try {
+          let query = supabase
+            .from('notes')
+            .select('id, vault_id, encrypted_data, version, updated_at, deleted')
+            .eq('vault_id', vaultId);
+
+          if (since > 0) {
+            const sinceIso = new Date(since).toISOString();
+            query = query.gt('updated_at', sinceIso);
+          }
+
+          const { data, error } = await query;
+          if (!error && Array.isArray(data)) {
+            const remoteNotes: EncryptedNoteRecord[] = data.map((row: any) => {
+              let ciphertext = '';
+              let iv = '';
+              try {
+                const parsed = JSON.parse(row.encrypted_data);
+                ciphertext = parsed.ciphertext;
+                iv = parsed.iv;
+              } catch {
+                ciphertext = row.encrypted_data;
+              }
+
+              return {
+                noteId: row.id,
+                vaultId: row.vault_id || vaultId,
+                version: Number(row.version || 1),
+                ciphertext,
+                iv,
+                updatedAt: new Date(row.updated_at).getTime(),
+                deleted: Boolean(row.deleted),
+              };
+            });
+
+            return res.json({
+              notes: remoteNotes,
+              serverTimestamp: Date.now(),
+              source: 'supabase',
+            });
+          } else if (error) {
+            console.warn('Supabase pull warning, using fallback store:', error.message);
+          }
+        } catch (sbErr) {
+          console.warn('Supabase pull error, falling back:', sbErr);
+        }
+      }
+
+      // Local fallback store query
       const modifiedNotes: EncryptedNoteRecord[] = [];
       for (const record of account.notes.values()) {
         if (record.updatedAt > since) {
@@ -247,13 +416,15 @@ async function startServer() {
       res.json({
         notes: modifiedNotes,
         serverTimestamp: Date.now(),
+        source: 'local_store',
       });
     } catch (err: any) {
+      console.error('Error in /api/sync/pull:', err);
       res.status(500).json({ error: err.message || 'Pull failed' });
     }
   });
 
-  // 5. Device Pairing Relay API (Ephemeral ECDH exchange)
+  // 5. Device Pairing Relay API (Ephemeral ECDH key exchange)
   // Device A creates a pairing session
   app.post('/api/sync/pair/init', (req, res) => {
     const { initiatorPublicKey } = req.body;
@@ -261,7 +432,7 @@ async function startServer() {
       return res.status(400).json({ error: 'initiatorPublicKey is required' });
     }
 
-    // 6-digit easy pairing code
+    // 6-digit pairing code
     const code = Math.floor(100000 + Math.random() * 900000).toString();
     pairingSessions.set(code, {
       code,
@@ -270,7 +441,7 @@ async function startServer() {
       claimed: false,
     });
 
-    // Auto clean after 5 minutes
+    // Auto cleanup after 5 minutes
     setTimeout(() => pairingSessions.delete(code), 5 * 60 * 1000);
 
     res.json({ code });

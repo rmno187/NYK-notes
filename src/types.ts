@@ -20,7 +20,8 @@ export type StorageMode = 'filesystem' | 'indexeddb' | 'vercel';
 export type SyncStatus = 'synced' | 'syncing' | 'offline' | 'error' | 'unconfigured';
 
 export interface VercelSyncConfig {
-  accountId: string;
+  vaultId: string;
+  accountId: string;     // alias for vaultId for backward compatibility
   authSalt: string;      // Base64 salt used for PBKDF2
   deviceId: string;
   deviceName: string;
@@ -31,6 +32,7 @@ export interface VercelSyncConfig {
 
 export interface EncryptedNoteEnvelope {
   noteId: string;
+  vaultId?: string;
   version: number;
   ciphertext: string;    // Base64 encoded AES-256-GCM ciphertext + tag
   iv: string;            // Base64 encoded 12-byte IV
