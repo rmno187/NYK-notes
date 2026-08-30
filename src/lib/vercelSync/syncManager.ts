@@ -141,8 +141,14 @@ class VercelSyncManager {
     });
 
     if (!response.ok) {
-      const err = await response.json().catch(() => ({ error: 'Sync authentication failed' }));
-      const msg = err.error || `Sync authentication failed (HTTP ${response.status})`;
+      let msg = `Sync authentication failed (HTTP ${response.status})`;
+      try {
+        const errJson = await response.json();
+        if (errJson.error) msg = errJson.error;
+      } catch {
+        const text = await response.text().catch(() => '');
+        if (text) msg = text;
+      }
       this.setStatus('error', msg);
       throw new Error(msg);
     }
@@ -173,7 +179,7 @@ class VercelSyncManager {
     await setSyncConfigItem('encryption_key_raw', derived.encryptionKeyRaw);
 
     this.config = config;
-    this.setStatus('synced');
+    this.setStatus('synced', null);
     this.startAutoSync();
 
     // Trigger initial full sync pull
@@ -213,7 +219,7 @@ class VercelSyncManager {
     await setSyncConfigItem('encryption_key_raw', rawEncryptionKey);
 
     this.config = config;
-    this.setStatus('synced');
+    this.setStatus('synced', null);
     this.startAutoSync();
 
     await this.sync();
@@ -256,7 +262,6 @@ class VercelSyncManager {
 
   // Save note locally, encrypt, and push/queue for sync
   public async saveNote(note: Note): Promise<void> {
-    // 1. Update local cache immediately for instant zero-lag response
     await saveVercelCacheNote(note);
 
     if (!this.encryptionKey || !this.authKeyHex) {
@@ -264,17 +269,14 @@ class VercelSyncManager {
     }
 
     try {
-      // 2. Encrypt note with AES-256-GCM
       const envelope = await encryptNote(note, this.encryptionKey);
 
       if (!navigator.onLine) {
-        // Queue for when network returns
         await queuePendingPush(envelope);
         this.setStatus('offline');
         return;
       }
 
-      // 3. Push to Vercel API
       this.pushSingleChange(envelope);
     } catch (err) {
       console.error('Failed to encrypt note for sync:', err);
@@ -326,8 +328,14 @@ class VercelSyncManager {
       });
 
       if (!response.ok) {
-        const errJson = await response.json().catch(() => ({ error: `HTTP ${response.status}` }));
-        const msg = errJson.error || `Push failed (HTTP ${response.status})`;
+        let msg = `Push failed (HTTP ${response.status})`;
+        try {
+          const errJson = await response.json();
+          if (errJson.error) msg = errJson.error;
+        } catch {
+          const text = await response.text().catch(() => '');
+          if (text) msg = text;
+        }
         await queuePendingPush(envelope);
         this.setStatus('error', msg);
       } else {
@@ -375,8 +383,15 @@ class VercelSyncManager {
             await removePendingPush(env.noteId);
           }
         } else {
-          const errJson = await pushRes.json().catch(() => ({ error: `HTTP ${pushRes.status}` }));
-          throw new Error(errJson.error || `Sync push failed with status ${pushRes.status}`);
+          let msg = `Sync push failed (HTTP ${pushRes.status})`;
+          try {
+            const errJson = await pushRes.json();
+            if (errJson.error) msg = errJson.error;
+          } catch {
+            const text = await pushRes.text().catch(() => '');
+            if (text) msg = text;
+          }
+          throw new Error(msg);
         }
       }
 
@@ -392,8 +407,15 @@ class VercelSyncManager {
       });
 
       if (!pullRes.ok) {
-        const errJson = await pullRes.json().catch(() => ({ error: `HTTP ${pullRes.status}` }));
-        throw new Error(errJson.error || `Sync pull failed with status ${pullRes.status}`);
+        let msg = `Sync pull failed (HTTP ${pullRes.status})`;
+        try {
+          const errJson = await pullRes.json();
+          if (errJson.error) msg = errJson.error;
+        } catch {
+          const text = await pullRes.text().catch(() => '');
+          if (text) msg = text;
+        }
+        throw new Error(msg);
       }
 
       const pullData = await pullRes.json();
@@ -444,7 +466,6 @@ class VercelSyncManager {
   // Periodic Auto-Sync Timer
   private startAutoSync() {
     this.stopAutoSync();
-    // Auto-sync every 30 seconds or when window gains focus
     this.syncTimer = window.setInterval(() => {
       if (this.isConfigured() && navigator.onLine) {
         this.sync();

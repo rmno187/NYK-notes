@@ -39,9 +39,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (!supabase) {
       const config = getSupabaseConfig();
       return res.status(500).json({
-        error: `Supabase environment variables missing on Vercel. (SUPABASE_URL: ${
-          config.url ? 'found' : 'missing'
-        }, SUPABASE_ANON_KEY: ${config.key ? 'found' : 'missing'})`,
+        error: `Supabase environment variables missing on Vercel. SUPABASE_URL: ${
+          config.url ? 'found (' + config.url.substring(0, 15) + '...)' : 'MISSING'
+        }, SUPABASE_ANON_KEY: ${config.key ? 'found' : 'MISSING'}. Go to Vercel Settings > Environment Variables.`,
       });
     }
 
@@ -68,38 +68,56 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
 
     if (supabaseRows.length > 0) {
-      // First attempt upsert with onConflict on (id, vault_id)
-      let { error } = await supabase.from('notes').upsert(supabaseRows, {
+      // 1. Try standard upsert with composite key (id, vault_id)
+      let upsertResult = await supabase.from('notes').upsert(supabaseRows, {
         onConflict: 'id,vault_id',
       });
 
-      // If composite key failed, try with single key 'id'
-      if (error && error.message.includes('onConflict')) {
-        const fallback = await supabase.from('notes').upsert(supabaseRows, {
+      // 2. If composite key constraint wasn't created, retry with single key 'id'
+      if (upsertResult.error && (upsertResult.error.message.includes('onConflict') || upsertResult.error.code === '42P10')) {
+        upsertResult = await supabase.from('notes').upsert(supabaseRows, {
           onConflict: 'id',
         });
-        error = fallback.error;
       }
 
-      if (error) {
+      // 3. If standard upsert still fails with a schema error, try raw insert
+      if (upsertResult.error && upsertResult.error.code !== '42501') {
+        // Try delete + insert per item to handle different table setups
+        for (const row of supabaseRows) {
+          await supabase.from('notes').delete().eq('id', row.id).eq('vault_id', row.vault_id);
+          const ins = await supabase.from('notes').insert(row);
+          if (ins.error) {
+            upsertResult = ins;
+            break;
+          }
+        }
+      }
+
+      if (upsertResult.error) {
+        const error = upsertResult.error;
         console.error('Supabase push error:', error);
-        if (error.message.includes('row-level security') || error.code === '42501') {
+        
+        if (error.message?.includes('row-level security') || error.code === '42501') {
           return res.status(500).json({
             error:
-              'Supabase Row Level Security (RLS) is blocking inserts. In your Supabase SQL editor, run: ALTER TABLE notes DISABLE ROW LEVEL SECURITY; or add an INSERT/UPDATE policy.',
+              'Supabase Row Level Security (RLS) is blocking inserts. In Supabase SQL Editor run: ALTER TABLE notes DISABLE ROW LEVEL SECURITY;',
             code: 'RLS_VIOLATION',
             detail: error.message,
           });
         }
-        if (error.message.includes('relation "notes" does not exist') || error.code === '42P01') {
+        if (error.message?.includes('relation "notes" does not exist') || error.code === '42P01') {
           return res.status(500).json({
             error:
-              'Supabase table "notes" does not exist. In your Supabase SQL Editor, run the CREATE TABLE statement.',
+              'Supabase table "notes" does not exist. Run the CREATE TABLE script in your Supabase SQL Editor.',
             code: 'TABLE_NOT_FOUND',
             detail: error.message,
           });
         }
-        return res.status(500).json({ error: error.message, code: error.code });
+        return res.status(500).json({
+          error: `Supabase Error: ${error.message || error.code || 'Unknown DB error'}`,
+          code: error.code,
+          hint: error.hint,
+        });
       }
     }
 
@@ -111,6 +129,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     });
   } catch (err: any) {
     console.error('Push error:', err);
-    return res.status(500).json({ error: err.message || 'Push failed' });
+    return res.status(500).json({ error: err.message || 'Push failed unexpectedly' });
   }
 }

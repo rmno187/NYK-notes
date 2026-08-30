@@ -35,9 +35,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (!supabase) {
       const config = getSupabaseConfig();
       return res.status(500).json({
-        error: `Supabase environment variables missing on Vercel. (SUPABASE_URL: ${
-          config.url ? 'found' : 'missing'
-        }, SUPABASE_ANON_KEY: ${config.key ? 'found' : 'missing'})`,
+        error: `Supabase environment variables missing on Vercel. SUPABASE_URL: ${
+          config.url ? 'found' : 'MISSING'
+        }, SUPABASE_ANON_KEY: ${config.key ? 'found' : 'MISSING'}. Go to Vercel Settings > Environment Variables.`,
       });
     }
 
@@ -54,23 +54,27 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const { data, error } = await query;
     if (error) {
       console.error('Supabase pull error:', error);
-      if (error.message.includes('row-level security') || error.code === '42501') {
+      if (error.message?.includes('row-level security') || error.code === '42501') {
         return res.status(500).json({
           error:
-            'Supabase Row Level Security (RLS) is blocking reads. In your Supabase SQL editor, run: ALTER TABLE notes DISABLE ROW LEVEL SECURITY; or add a SELECT policy.',
+            'Supabase Row Level Security (RLS) is blocking reads. In Supabase SQL Editor run: ALTER TABLE notes DISABLE ROW LEVEL SECURITY;',
           code: 'RLS_VIOLATION',
           detail: error.message,
         });
       }
-      if (error.message.includes('relation "notes" does not exist') || error.code === '42P01') {
+      if (error.message?.includes('relation "notes" does not exist') || error.code === '42P01') {
         return res.status(500).json({
           error:
-            'Supabase table "notes" does not exist. In your Supabase SQL Editor, run the CREATE TABLE statement.',
+            'Supabase table "notes" does not exist. Run the CREATE TABLE script in your Supabase SQL Editor.',
           code: 'TABLE_NOT_FOUND',
           detail: error.message,
         });
       }
-      return res.status(500).json({ error: error.message, code: error.code });
+      return res.status(500).json({
+        error: `Supabase Error: ${error.message || error.code || 'Unknown DB error'}`,
+        code: error.code,
+        hint: error.hint,
+      });
     }
 
     const remoteNotes = (data || []).map((row: any) => {
@@ -102,6 +106,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     });
   } catch (err: any) {
     console.error('Pull error:', err);
-    return res.status(500).json({ error: err.message || 'Pull failed' });
+    return res.status(500).json({ error: err.message || 'Pull failed unexpectedly' });
   }
 }
