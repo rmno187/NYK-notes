@@ -522,7 +522,9 @@ export default function App() {
         for (const noteId of noteIds) {
           const note = notes.find((n) => n.id === noteId);
           try {
-            if (storageMode === 'filesystem' && directoryHandle && note?.fileName) {
+            if (storageMode === 'vercel') {
+              await syncManager.deleteNote(noteId);
+            } else if (storageMode === 'filesystem' && directoryHandle && note?.fileName) {
               await deleteNoteFromDirectory(directoryHandle, note.fileName);
             } else {
               await deleteIndexedDBNote(noteId);

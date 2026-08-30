@@ -242,6 +242,20 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
   }, []);
 
   const handleUndo = useCallback(() => {
+    if (mode === 'wysiwyg' && wysiwygRef.current) {
+      wysiwygRef.current.focus();
+      if (document.queryCommandSupported('undo') && document.execCommand('undo', false)) {
+        handleWysiwygInput();
+        return;
+      }
+    }
+    if (mode === 'markdown' && textareaRef.current) {
+      textareaRef.current.focus();
+      if (document.queryCommandSupported('undo') && document.execCommand('undo', false)) {
+        return;
+      }
+    }
+
     if (historyIdxRef.current > 0) {
       isUndoRedoActionRef.current = true;
       historyIdxRef.current -= 1;
@@ -265,6 +279,20 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
   }, [onChangeContent, mode]);
 
   const handleRedo = useCallback(() => {
+    if (mode === 'wysiwyg' && wysiwygRef.current) {
+      wysiwygRef.current.focus();
+      if (document.queryCommandSupported('redo') && document.execCommand('redo', false)) {
+        handleWysiwygInput();
+        return;
+      }
+    }
+    if (mode === 'markdown' && textareaRef.current) {
+      textareaRef.current.focus();
+      if (document.queryCommandSupported('redo') && document.execCommand('redo', false)) {
+        return;
+      }
+    }
+
     if (historyIdxRef.current < historyRef.current.length - 1) {
       isUndoRedoActionRef.current = true;
       historyIdxRef.current += 1;
@@ -914,26 +942,6 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
   const handleWysiwygKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
     if (!wysiwygRef.current) return;
 
-    const isCmdOrCtrl = e.metaKey || e.ctrlKey;
-    const keyLower = e.key.toLowerCase();
-
-    if (isCmdOrCtrl && keyLower === 'z') {
-      if (e.shiftKey) {
-        e.preventDefault();
-        handleRedo();
-      } else {
-        e.preventDefault();
-        handleUndo();
-      }
-      return;
-    }
-
-    if (isCmdOrCtrl && keyLower === 'y') {
-      e.preventDefault();
-      handleRedo();
-      return;
-    }
-
     if (e.key === 'Tab') {
       e.preventDefault();
       const info = getCaretBlockAndOffset(wysiwygRef.current);
@@ -1298,23 +1306,6 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
   const handleKeyDownMarkdown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     const isCmdOrCtrl = e.metaKey || e.ctrlKey;
     const keyLower = e.key.toLowerCase();
-
-    if (isCmdOrCtrl && keyLower === 'z') {
-      if (e.shiftKey) {
-        e.preventDefault();
-        handleRedo();
-      } else {
-        e.preventDefault();
-        handleUndo();
-      }
-      return;
-    }
-
-    if (isCmdOrCtrl && keyLower === 'y') {
-      e.preventDefault();
-      handleRedo();
-      return;
-    }
 
     if (isCmdOrCtrl) {
       if (keyLower === 'b') {
