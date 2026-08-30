@@ -13,6 +13,7 @@ import { syncManager } from './lib/vercelSync/syncManager';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { convertHtmlToMarkdown, parseMarkdownNote, formatBlogDate } from './lib/markdown';
 import { isMac, modSymbol } from './lib/platform';
+import { isNoteEmpty } from './lib/noteUtils';
 import { Sidebar } from './components/Sidebar';
 import { EditorPane } from './components/EditorPane';
 import { DirectorySelectorModal } from './components/DirectorySelectorModal';
@@ -159,6 +160,8 @@ export default function App() {
           for (const note of storedNotes) {
             if (note.deletedAt && now - note.deletedAt > THIRTY_DAYS_MS) {
               await deleteIndexedDBNote(note.id);
+            } else if (isNoteEmpty(note) && !note.deletedAt) {
+              await deleteIndexedDBNote(note.id);
             } else {
               const cleanNote =
                 note.content.trim().startsWith('<p>') && note.content.includes('</p>')
@@ -198,9 +201,8 @@ export default function App() {
     if (storageMode !== 'vercel') return;
 
     const unsubscribe = syncManager.subscribeNotes((remoteNotes) => {
-      setNotes((prev) => {
-        // Merge smoothly while preserving active note selection
-        return remoteNotes;
+      setNotes(() => {
+        return remoteNotes.filter((n) => !isNoteEmpty(n) || n.deletedAt);
       });
     });
 
@@ -224,6 +226,11 @@ export default function App() {
   // Handle Note Save to Active Storage Provider
   const persistNote = useCallback(
     async (updatedNote: Note) => {
+      // Do not sync or persist empty notes unless it's a deletion tombstone
+      if (isNoteEmpty(updatedNote) && !updatedNote.deletedAt) {
+        return;
+      }
+
       try {
         if (storageMode === 'vercel') {
           await syncManager.saveNote(updatedNote);
@@ -380,26 +387,15 @@ export default function App() {
     [activeNoteId, persistNote]
   );
 
-  // Helper to determine if a note is completely empty
-  const isNoteEmpty = useCallback((note: Note) => {
-    const cleanTitle = (note.title || '').trim();
-    const cleanContent = (note.content || '')
-      .replace(/&nbsp;/gi, '')
-      .replace(/<br\s*\/?>/gi, '')
-      .replace(/<p>\s*<\/p>/gi, '')
-      .replace(/<[^>]*>/g, '')
-      .replace(/\s+/g, '')
-      .trim();
-    return cleanTitle === '' && cleanContent === '';
-  }, []);
-
   const checkAndDeleteEmptyNote = useCallback(
     (noteId: string | null) => {
       if (!noteId) return;
       setNotes((prev) => {
         const target = prev.find((n) => n.id === noteId);
-        if (target && isNoteEmpty(target)) {
-          if (storageMode === 'filesystem' && directoryHandle && target.fileName) {
+        if (target && isNoteEmpty(target) && !target.deletedAt) {
+          if (storageMode === 'vercel') {
+            syncManager.deleteNote(target.id).catch(() => {});
+          } else if (storageMode === 'filesystem' && directoryHandle && target.fileName) {
             deleteNoteFromDirectory(directoryHandle, target.fileName).catch(() => {});
           } else {
             deleteIndexedDBNote(target.id).catch(() => {});
@@ -409,7 +405,7 @@ export default function App() {
         return prev;
       });
     },
-    [storageMode, directoryHandle, isNoteEmpty]
+    [storageMode, directoryHandle]
   );
 
   // Select Note
@@ -467,9 +463,11 @@ export default function App() {
       setNotes((prev) => {
         // Purge any empty notes so spamming Alt+N never stacks empty notes
         const cleaned = prev.filter((n) => {
-          const empty = isNoteEmpty(n);
+          const empty = isNoteEmpty(n) && !n.deletedAt;
           if (empty) {
-            if (storageMode === 'filesystem' && directoryHandle && n.fileName) {
+            if (storageMode === 'vercel') {
+              syncManager.deleteNote(n.id).catch(() => {});
+            } else if (storageMode === 'filesystem' && directoryHandle && n.fileName) {
               deleteNoteFromDirectory(directoryHandle, n.fileName).catch(() => {});
             } else {
               deleteIndexedDBNote(n.id).catch(() => {});
@@ -482,9 +480,11 @@ export default function App() {
 
       setActiveNoteId(newNote.id);
       setMobileView('editor');
-      persistNote(newNote);
+      if (!isNoteEmpty(newNote)) {
+        persistNote(newNote);
+      }
     },
-    [selectedTag, persistNote, storageMode, directoryHandle, isNoteEmpty]
+    [selectedTag, persistNote, storageMode, directoryHandle]
   );
 
   // Batch Delete Notes

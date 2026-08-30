@@ -3,6 +3,7 @@
 // offline queues, conflict resolution, and status notifications.
 
 import { Note, SyncStatus, EncryptedNoteEnvelope, VercelSyncConfig } from '../../types';
+import { isNoteEmpty } from '../noteUtils';
 import {
   deriveSyncKeys,
   importRawEncryptionKey,
@@ -131,7 +132,7 @@ class VercelSyncManager {
       const vercelIds = new Set(vercelCache.map((n) => n.id));
 
       for (const note of localIdbNotes) {
-        if (!vercelIds.has(note.id)) {
+        if (!isNoteEmpty(note) && !vercelIds.has(note.id)) {
           await saveVercelCacheNote(note);
           const envelope = await encryptNote(note, this.encryptionKey);
           await queuePendingPush(envelope);
@@ -286,11 +287,26 @@ class VercelSyncManager {
 
   // Load active notes from isolated working cache
   public async loadNotes(): Promise<Note[]> {
-    return getVercelCacheNotes();
+    const cached = await getVercelCacheNotes();
+    const valid: Note[] = [];
+    for (const note of cached) {
+      if (isNoteEmpty(note) && !note.deletedAt) {
+        await deleteVercelCacheNote(note.id);
+      } else {
+        valid.push(note);
+      }
+    }
+    return valid;
   }
 
   // Save note locally, encrypt, and push/queue for sync
   public async saveNote(note: Note): Promise<void> {
+    // If the note is empty and not deleted, never save to cache or sync to server
+    if (isNoteEmpty(note) && !note.deletedAt) {
+      await deleteVercelCacheNote(note.id);
+      return;
+    }
+
     await saveVercelCacheNote(note);
 
     if (!this.encryptionKey || !this.authKeyHex) {
@@ -444,13 +460,19 @@ class VercelSyncManager {
 
             const decrypted = await decryptNote(envelope, this.encryptionKey);
             if (decrypted) {
-              await saveVercelCacheNote(decrypted);
-              localMap.set(decrypted.id, decrypted);
-              hasChanges = true;
+              if (isNoteEmpty(decrypted) && !decrypted.deletedAt) {
+                await deleteVercelCacheNote(decrypted.id);
+                localMap.delete(decrypted.id);
+                hasChanges = true;
+              } else {
+                await saveVercelCacheNote(decrypted);
+                localMap.set(decrypted.id, decrypted);
+                hasChanges = true;
+              }
             }
           }
 
-          const allWorking = Array.from(localMap.values());
+          const allWorking = Array.from(localMap.values()).filter((n) => !isNoteEmpty(n) || n.deletedAt);
           if (hasChanges || localNotes.length === 0) {
             this.notesListeners.forEach((l) => l(allWorking));
           }
@@ -535,13 +557,19 @@ class VercelSyncManager {
 
           const decrypted = await decryptNote(envelope, this.encryptionKey);
           if (decrypted) {
-            await saveVercelCacheNote(decrypted);
-            localMap.set(decrypted.id, decrypted);
-            hasChanges = true;
+            if (isNoteEmpty(decrypted) && !decrypted.deletedAt) {
+              await deleteVercelCacheNote(decrypted.id);
+              localMap.delete(decrypted.id);
+              hasChanges = true;
+            } else {
+              await saveVercelCacheNote(decrypted);
+              localMap.set(decrypted.id, decrypted);
+              hasChanges = true;
+            }
           }
         }
 
-        const allWorking = Array.from(localMap.values());
+        const allWorking = Array.from(localMap.values()).filter((n) => !isNoteEmpty(n) || n.deletedAt);
         if (hasChanges || localNotes.length === 0) {
           this.notesListeners.forEach((l) => l(allWorking));
         }

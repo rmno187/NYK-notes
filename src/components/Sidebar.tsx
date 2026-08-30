@@ -14,6 +14,7 @@ import {
 import { Note, StorageMode } from '../types';
 import { NotePreview } from './NotePreview';
 import { modKey } from '../lib/platform';
+import { isNoteEmpty } from '../lib/noteUtils';
 import { SyncStatusIndicator } from './SyncStatusIndicator';
 
 interface SidebarProps {
@@ -125,8 +126,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
     };
   }, []);
 
-  const activeNotes = notes.filter((n) => !n.deletedAt && n.type !== 'post');
-  const blogNotes = notes.filter((n) => !n.deletedAt && n.type === 'post');
+  const activeNotes = notes.filter((n) => !n.deletedAt && n.type !== 'post' && !isNoteEmpty(n));
+  const blogNotes = notes.filter((n) => !n.deletedAt && n.type === 'post' && !isNoteEmpty(n));
   const trashedNotes = notes.filter((n) => Boolean(n.deletedAt));
 
   const currentNotesList =
