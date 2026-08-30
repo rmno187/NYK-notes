@@ -852,7 +852,7 @@ export default function App() {
   });
 
   return (
-    <div className="flex flex-col h-full w-full overflow-hidden fixed inset-0 bg-white dark:bg-black text-black dark:text-white font-sans antialiased transition-colors duration-200">
+    <div className="flex flex-col h-[100dvh] w-full overflow-hidden bg-white dark:bg-black text-black dark:text-white font-sans antialiased transition-colors duration-200">
       {/* Main Workspace */}
       <div className="flex-1 flex overflow-hidden relative">
         {/* Sidebar */}

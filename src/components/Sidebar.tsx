@@ -9,6 +9,7 @@ import {
   ArchiveX,
   CheckSquare,
   ChevronDown,
+  RefreshCw,
 } from 'lucide-react';
 import { Note, StorageMode } from '../types';
 import { NotePreview } from './NotePreview';
@@ -64,6 +65,42 @@ export const Sidebar: React.FC<SidebarProps> = ({
     useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const isLongPressRef = useRef(false);
+
+  // Pull-to-refresh on mobile
+  const [pullDistance, setPullDistance] = useState(0);
+  const [isPullRefreshing, setIsPullRefreshing] = useState(false);
+  const touchStartYRef = useRef<number | null>(null);
+  const listContainerRef = useRef<HTMLDivElement>(null);
+
+  const handleTouchStart = (e: React.TouchEvent) => {
+    if (listContainerRef.current && listContainerRef.current.scrollTop <= 0) {
+      touchStartYRef.current = e.touches[0].clientY;
+    } else {
+      touchStartYRef.current = null;
+    }
+  };
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    if (touchStartYRef.current !== null && listContainerRef.current && listContainerRef.current.scrollTop <= 0) {
+      const delta = e.touches[0].clientY - touchStartYRef.current;
+      if (delta > 0) {
+        setPullDistance(Math.min(delta * 0.4, 70));
+      }
+    }
+  };
+
+  const handleTouchEnd = () => {
+    if (pullDistance > 45) {
+      setIsPullRefreshing(true);
+      setPullDistance(45);
+      setTimeout(() => {
+        window.location.reload();
+      }, 300);
+    } else {
+      setPullDistance(0);
+    }
+    touchStartYRef.current = null;
+  };
 
   // Clear selections when changing tabs
   useEffect(() => {
@@ -557,7 +594,34 @@ export const Sidebar: React.FC<SidebarProps> = ({
           NOTES / TRASH LIST
           ================================================== */}
 
-      <div className="flex-1 overflow-y-auto px-2">
+      <div
+        ref={listContainerRef}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
+        className="flex-1 overflow-y-auto px-2 relative overscroll-y-contain"
+      >
+        {/* PULL TO REFRESH INDICATOR */}
+        {pullDistance > 0 && (
+          <div
+            style={{ height: `${pullDistance}px` }}
+            className="flex items-center justify-center overflow-hidden transition-all text-neutral-500 dark:text-neutral-400 text-xs gap-1.5"
+          >
+            <RefreshCw
+              className={`w-3.5 h-3.5 ${
+                isPullRefreshing || pullDistance > 45 ? 'animate-spin text-black dark:text-white' : ''
+              }`}
+            />
+            <span className="text-[11px] font-medium">
+              {isPullRefreshing
+                ? 'Reloading app…'
+                : pullDistance > 45
+                ? 'Release to reload'
+                : 'Pull down to refresh'}
+            </span>
+          </div>
+        )}
+
         {/* TRASH INFO */}
 
         {activeTab === 'trash' && (
