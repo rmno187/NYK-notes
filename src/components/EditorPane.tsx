@@ -162,6 +162,7 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
     }
   };
 
+  const contentScrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const wysiwygRef = useRef<HTMLDivElement>(null);
   const [tagInput, setTagInput] = useState('');
@@ -232,7 +233,7 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
 
   const focusContent = useCallback(() => {
     if (mode === 'wysiwyg' && wysiwygRef.current) {
-      wysiwygRef.current.focus();
+      wysiwygRef.current.focus({ preventScroll: true });
       const sel = window.getSelection();
       if (sel) {
         const range = document.createRange();
@@ -246,14 +247,20 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
         sel.removeAllRanges();
         sel.addRange(range);
       }
+      if (contentScrollRef.current) {
+        contentScrollRef.current.scrollTop = 0;
+      }
     } else if (mode === 'markdown' && textareaRef.current) {
-      textareaRef.current.focus();
+      textareaRef.current.focus({ preventScroll: true });
       const len = textareaRef.current.value.length;
       textareaRef.current.setSelectionRange(len, len);
+      if (contentScrollRef.current) {
+        contentScrollRef.current.scrollTop = 0;
+      }
     }
   }, [mode]);
 
-  // Auto-focus on the row below the title when a new note is created
+  // Auto-focus on the row below the title when a new note is created without dragging down view
   const prevActiveNoteIdRef = useRef<string>(note.id);
   useEffect(() => {
     const isNew = prevActiveNoteIdRef.current !== note.id;
@@ -261,8 +268,13 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
     if (isNew && (!note.title && !note.content)) {
       const timer = setTimeout(() => {
         focusContent();
+        if (contentScrollRef.current) {
+          contentScrollRef.current.scrollTop = 0;
+        }
       }, 50);
       return () => clearTimeout(timer);
+    } else if (isNew && contentScrollRef.current) {
+      contentScrollRef.current.scrollTop = 0;
     }
   }, [note.id, note.title, note.content, focusContent]);
 
@@ -1927,13 +1939,13 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
 
 
 
-      {/* Formatting Toolbar - Sticky at bottom on mobile, sticky under header on desktop */}
+      {/* Formatting Toolbar - Floating bottom pill on mobile, clean subheader bar on desktop */}
       <div
         onMouseDown={(e) => e.preventDefault()}
-        className="shrink-0 border-t md:border-t-0 md:border-b border-neutral-200 dark:border-neutral-800 px-3 sm:px-5 py-1.5 bg-neutral-50/95 dark:bg-neutral-950/95 md:bg-transparent backdrop-blur select-none order-2 md:order-1 sticky bottom-0 md:static z-20"
-        style={{ paddingBottom: 'max(0.375rem, env(safe-area-inset-bottom))' }}
+        className="pointer-events-none sticky bottom-3 z-30 flex justify-center px-4 w-full md:static md:pointer-events-auto md:w-auto md:px-5 md:py-1.5 md:border-b md:border-neutral-200 md:dark:border-neutral-800 md:bg-transparent select-none order-2 md:order-1"
+        style={{ paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))' }}
       >
-        <div className="flex items-center gap-0.5 overflow-x-auto scrollbar-none min-h-[32px]">
+        <div className="pointer-events-auto flex items-center gap-1 overflow-x-auto scrollbar-none px-2 py-1 bg-neutral-900/90 dark:bg-neutral-900/90 md:bg-transparent text-neutral-100 md:text-inherit rounded-full md:rounded-none shadow-lg md:shadow-none border border-neutral-700/50 dark:border-neutral-700/50 md:border-none backdrop-blur-md max-w-full">
           {hasTextSelection ? (
             /* Selection Toolbar: B, I, U, link, H1, H2, code block, quote */
             <>
@@ -1942,10 +1954,10 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => handleFormat('bold')}
                 title={`Bold (${modSymbol}B)`}
-                className={`p-1.5 rounded-md transition-colors shrink-0 ${
+                className={`p-1.5 rounded-full md:rounded-md transition-colors shrink-0 ${
                   activeFormats.bold
-                    ? 'bg-neutral-200 dark:bg-neutral-800 text-blue-600 dark:text-blue-400 font-bold'
-                    : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-100 hover:bg-neutral-100 dark:hover:bg-neutral-800/60'
+                    ? 'bg-blue-600 text-white md:bg-neutral-200 md:dark:bg-neutral-800 md:text-blue-600 md:dark:text-blue-400 font-bold'
+                    : 'text-neutral-300 md:text-neutral-600 md:dark:text-neutral-400 hover:text-white md:hover:text-neutral-900 md:dark:hover:text-neutral-100 hover:bg-neutral-800/80 md:hover:bg-neutral-100 md:dark:hover:bg-neutral-800/60'
                 }`}
               >
                 <Bold className="w-4 h-4" />
@@ -1956,10 +1968,10 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => handleFormat('italic')}
                 title={`Italic (${modSymbol}I)`}
-                className={`p-1.5 rounded-md transition-colors shrink-0 ${
+                className={`p-1.5 rounded-full md:rounded-md transition-colors shrink-0 ${
                   activeFormats.italic
-                    ? 'bg-neutral-200 dark:bg-neutral-800 text-blue-600 dark:text-blue-400 font-bold'
-                    : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-100 hover:bg-neutral-100 dark:hover:bg-neutral-800/60'
+                    ? 'bg-blue-600 text-white md:bg-neutral-200 md:dark:bg-neutral-800 md:text-blue-600 md:dark:text-blue-400 font-bold'
+                    : 'text-neutral-300 md:text-neutral-600 md:dark:text-neutral-400 hover:text-white md:hover:text-neutral-900 md:dark:hover:text-neutral-100 hover:bg-neutral-800/80 md:hover:bg-neutral-100 md:dark:hover:bg-neutral-800/60'
                 }`}
               >
                 <Italic className="w-4 h-4" />
@@ -1970,10 +1982,10 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => handleFormat('underline')}
                 title="Underline"
-                className={`p-1.5 rounded-md transition-colors shrink-0 ${
+                className={`p-1.5 rounded-full md:rounded-md transition-colors shrink-0 ${
                   activeFormats.underline
-                    ? 'bg-neutral-200 dark:bg-neutral-800 text-blue-600 dark:text-blue-400 font-bold'
-                    : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-100 hover:bg-neutral-100 dark:hover:bg-neutral-800/60'
+                    ? 'bg-blue-600 text-white md:bg-neutral-200 md:dark:bg-neutral-800 md:text-blue-600 md:dark:text-blue-400 font-bold'
+                    : 'text-neutral-300 md:text-neutral-600 md:dark:text-neutral-400 hover:text-white md:hover:text-neutral-900 md:dark:hover:text-neutral-100 hover:bg-neutral-800/80 md:hover:bg-neutral-100 md:dark:hover:bg-neutral-800/60'
                 }`}
               >
                 <Underline className="w-4 h-4" />
@@ -1984,26 +1996,26 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => handleFormat('link')}
                 title="Insert Link"
-                className={`p-1.5 rounded-md transition-colors shrink-0 ${
+                className={`p-1.5 rounded-full md:rounded-md transition-colors shrink-0 ${
                   activeFormats.link
-                    ? 'bg-neutral-200 dark:bg-neutral-800 text-blue-600 dark:text-blue-400 font-bold'
-                    : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-100 hover:bg-neutral-100 dark:hover:bg-neutral-800/60'
+                    ? 'bg-blue-600 text-white md:bg-neutral-200 md:dark:bg-neutral-800 md:text-blue-600 md:dark:text-blue-400 font-bold'
+                    : 'text-neutral-300 md:text-neutral-600 md:dark:text-neutral-400 hover:text-white md:hover:text-neutral-900 md:dark:hover:text-neutral-100 hover:bg-neutral-800/80 md:hover:bg-neutral-100 md:dark:hover:bg-neutral-800/60'
                 }`}
               >
                 <Link className="w-4 h-4" />
               </button>
 
-              <div className="w-px h-4 bg-neutral-200 dark:bg-neutral-800 mx-1 shrink-0" />
+              <div className="w-px h-4 bg-neutral-700/60 md:bg-neutral-200 md:dark:bg-neutral-800 mx-1 shrink-0" />
 
               <button
                 type="button"
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => handleFormat('heading')}
                 title="Heading 1"
-                className={`p-1.5 rounded-md transition-colors shrink-0 ${
+                className={`p-1.5 rounded-full md:rounded-md transition-colors shrink-0 ${
                   activeFormats.heading
-                    ? 'bg-neutral-200 dark:bg-neutral-800 text-blue-600 dark:text-blue-400 font-bold'
-                    : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-100 hover:bg-neutral-100 dark:hover:bg-neutral-800/60'
+                    ? 'bg-blue-600 text-white md:bg-neutral-200 md:dark:bg-neutral-800 md:text-blue-600 md:dark:text-blue-400 font-bold'
+                    : 'text-neutral-300 md:text-neutral-600 md:dark:text-neutral-400 hover:text-white md:hover:text-neutral-900 md:dark:hover:text-neutral-100 hover:bg-neutral-800/80 md:hover:bg-neutral-100 md:dark:hover:bg-neutral-800/60'
                 }`}
               >
                 <Heading1 className="w-4 h-4" />
@@ -2014,10 +2026,10 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => handleFormat('h2')}
                 title="Heading 2"
-                className={`p-1.5 rounded-md transition-colors shrink-0 ${
+                className={`p-1.5 rounded-full md:rounded-md transition-colors shrink-0 ${
                   activeFormats.h2
-                    ? 'bg-neutral-200 dark:bg-neutral-800 text-blue-600 dark:text-blue-400 font-bold'
-                    : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-100 hover:bg-neutral-100 dark:hover:bg-neutral-800/60'
+                    ? 'bg-blue-600 text-white md:bg-neutral-200 md:dark:bg-neutral-800 md:text-blue-600 md:dark:text-blue-400 font-bold'
+                    : 'text-neutral-300 md:text-neutral-600 md:dark:text-neutral-400 hover:text-white md:hover:text-neutral-900 md:dark:hover:text-neutral-100 hover:bg-neutral-800/80 md:hover:bg-neutral-100 md:dark:hover:bg-neutral-800/60'
                 }`}
               >
                 <Heading2 className="w-4 h-4" />
@@ -2028,10 +2040,10 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => handleFormat('code')}
                 title="Code Block"
-                className={`p-1.5 rounded-md transition-colors shrink-0 ${
+                className={`p-1.5 rounded-full md:rounded-md transition-colors shrink-0 ${
                   activeFormats.code
-                    ? 'bg-neutral-200 dark:bg-neutral-800 text-blue-600 dark:text-blue-400 font-bold'
-                    : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-100 hover:bg-neutral-100 dark:hover:bg-neutral-800/60'
+                    ? 'bg-blue-600 text-white md:bg-neutral-200 md:dark:bg-neutral-800 md:text-blue-600 md:dark:text-blue-400 font-bold'
+                    : 'text-neutral-300 md:text-neutral-600 md:dark:text-neutral-400 hover:text-white md:hover:text-neutral-900 md:dark:hover:text-neutral-100 hover:bg-neutral-800/80 md:hover:bg-neutral-100 md:dark:hover:bg-neutral-800/60'
                 }`}
               >
                 <Code className="w-4 h-4" />
@@ -2042,10 +2054,10 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => handleFormat('quote')}
                 title="Quote"
-                className={`p-1.5 rounded-md transition-colors shrink-0 ${
+                className={`p-1.5 rounded-full md:rounded-md transition-colors shrink-0 ${
                   activeFormats.quote
-                    ? 'bg-neutral-200 dark:bg-neutral-800 text-blue-600 dark:text-blue-400 font-bold'
-                    : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-100 hover:bg-neutral-100 dark:hover:bg-neutral-800/60'
+                    ? 'bg-blue-600 text-white md:bg-neutral-200 md:dark:bg-neutral-800 md:text-blue-600 md:dark:text-blue-400 font-bold'
+                    : 'text-neutral-300 md:text-neutral-600 md:dark:text-neutral-400 hover:text-white md:hover:text-neutral-900 md:dark:hover:text-neutral-100 hover:bg-neutral-800/80 md:hover:bg-neutral-100 md:dark:hover:bg-neutral-800/60'
                 }`}
               >
                 <Quote className="w-4 h-4" />
@@ -2059,7 +2071,7 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={handleUndo}
                 title={`Undo (${modSymbol}Z)`}
-                className="p-1.5 rounded-md transition-colors text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-100 hover:bg-neutral-100 dark:hover:bg-neutral-800/60 shrink-0"
+                className="p-1.5 rounded-full md:rounded-md transition-colors text-neutral-300 md:text-neutral-600 md:dark:text-neutral-400 hover:text-white md:hover:text-neutral-900 md:dark:hover:text-neutral-100 hover:bg-neutral-800/80 md:hover:bg-neutral-100 md:dark:hover:bg-neutral-800/60 shrink-0"
               >
                 <Undo className="w-4 h-4" />
               </button>
@@ -2069,22 +2081,22 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={handleRedo}
                 title={`Redo (${modSymbol}Y)`}
-                className="p-1.5 rounded-md transition-colors text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-100 hover:bg-neutral-100 dark:hover:bg-neutral-800/60 shrink-0"
+                className="p-1.5 rounded-full md:rounded-md transition-colors text-neutral-300 md:text-neutral-600 md:dark:text-neutral-400 hover:text-white md:hover:text-neutral-900 md:dark:hover:text-neutral-100 hover:bg-neutral-800/80 md:hover:bg-neutral-100 md:dark:hover:bg-neutral-800/60 shrink-0"
               >
                 <Redo className="w-4 h-4" />
               </button>
 
-              <div className="w-px h-4 bg-neutral-200 dark:bg-neutral-800 mx-1 shrink-0" />
+              <div className="w-px h-4 bg-neutral-700/60 md:bg-neutral-200 md:dark:bg-neutral-800 mx-1 shrink-0" />
 
               <button
                 type="button"
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => handleFormat('task')}
                 title="Checkbox / Task List"
-                className={`p-1.5 rounded-md transition-colors shrink-0 ${
+                className={`p-1.5 rounded-full md:rounded-md transition-colors shrink-0 ${
                   activeFormats.task
-                    ? 'bg-neutral-200 dark:bg-neutral-800 text-blue-600 dark:text-blue-400 font-bold'
-                    : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-100 hover:bg-neutral-100 dark:hover:bg-neutral-800/60'
+                    ? 'bg-blue-600 text-white md:bg-neutral-200 md:dark:bg-neutral-800 md:text-blue-600 md:dark:text-blue-400 font-bold'
+                    : 'text-neutral-300 md:text-neutral-600 md:dark:text-neutral-400 hover:text-white md:hover:text-neutral-900 md:dark:hover:text-neutral-100 hover:bg-neutral-800/80 md:hover:bg-neutral-100 md:dark:hover:bg-neutral-800/60'
                 }`}
               >
                 <CheckSquare className="w-4 h-4" />
@@ -2095,7 +2107,7 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => handleFormat('table')}
                 title="Insert Table"
-                className="p-1.5 rounded-md transition-colors text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-100 hover:bg-neutral-100 dark:hover:bg-neutral-800/60 shrink-0"
+                className="p-1.5 rounded-full md:rounded-md transition-colors text-neutral-300 md:text-neutral-600 md:dark:text-neutral-400 hover:text-white md:hover:text-neutral-900 md:dark:hover:text-neutral-100 hover:bg-neutral-800/80 md:hover:bg-neutral-100 md:dark:hover:bg-neutral-800/60 shrink-0"
               >
                 <Table className="w-4 h-4" />
               </button>
@@ -2105,7 +2117,7 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => handleFormat('hr')}
                 title="Horizontal Line"
-                className="p-1.5 rounded-md transition-colors text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-100 hover:bg-neutral-100 dark:hover:bg-neutral-800/60 shrink-0"
+                className="p-1.5 rounded-full md:rounded-md transition-colors text-neutral-300 md:text-neutral-600 md:dark:text-neutral-400 hover:text-white md:hover:text-neutral-900 md:dark:hover:text-neutral-100 hover:bg-neutral-800/80 md:hover:bg-neutral-100 md:dark:hover:bg-neutral-800/60 shrink-0"
               >
                 <Minus className="w-4 h-4" />
               </button>
@@ -2116,7 +2128,10 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
 
 
       {/* Content Area: Title + WYSIWYG or Raw Markdown */}
-      <div className="flex-1 p-4 sm:p-6 overflow-y-auto relative min-w-0 w-full flex flex-col order-1 md:order-2">
+      <div
+        ref={contentScrollRef}
+        className="flex-1 p-4 sm:p-6 overflow-y-auto relative min-w-0 w-full flex flex-col order-1 md:order-2"
+      >
         {/* Title inside the Editor Box */}
         <div className="mb-4 pb-2 border-b border-neutral-100 dark:border-neutral-900 shrink-0">
           <input

@@ -21,6 +21,18 @@ turndown.addRule('underline', {
   replacement: (content) => `<u>${content}</u>`,
 });
 
+// Add rule to preserve empty paragraphs / blank lines in Turndown
+turndown.addRule('emptyParagraphs', {
+  filter: (node) => {
+    if (node.nodeName !== 'P') return false;
+    const el = node as HTMLElement;
+    const inner = el.innerHTML.trim().toLowerCase();
+    const text = el.textContent?.replace(/[\r\n\s\u00A0\u200B-\u200D\uFEFF]/g, '') || '';
+    return text === '' && (inner === '' || inner === '<br>' || inner === '<br/>' || inner === '<br />' || inner === '&nbsp;');
+  },
+  replacement: () => '\n\n<br>\n\n',
+});
+
 // Add rule for task lists checkbox inputs
 turndown.addRule('taskListInputs', {
   filter: (node) => {
@@ -331,16 +343,25 @@ export function renderMarkdownToHtml(markdownContent: string): string {
   if (cleanMarkdown.trim().startsWith('<p>') && cleanMarkdown.includes('</p>')) {
     cleanMarkdown = convertHtmlToMarkdown(cleanMarkdown);
   }
+
+  // Preserve multiple blank lines in markdown by converting extra newlines to <br>
+  // A standard paragraph break is \n\n. Any additional newlines (\n\n\n+) represent explicit blank lines.
+  cleanMarkdown = cleanMarkdown.replace(/\n\n(\n+)/g, (_match, extraNewlines) => {
+    return '\n\n' + '<br>\n\n'.repeat(extraNewlines.length);
+  });
+
   try {
     const rawHtml = marked.parse(cleanMarkdown) as string;
     // 1. Remove disabled attribute from checkbox inputs so they can be clicked/toggled
     // 2. Strip inline style attributes from raw tags to prevent dark mode color issues
     // 3. Strip deprecated <font> tags
+    // 4. Ensure empty <p></p> tags have <br> inside so they maintain paragraph line height
     return rawHtml
       .replace(/<input([^>]*)\sdisabled=""([^>]*)>/gi, '<input$1$2>')
       .replace(/<input([^>]*)\sdisabled([^>]*)>/gi, '<input$1$2>')
       .replace(/<\/?font[^>]*>/gi, '')
-      .replace(/\sstyle="[^"]*"/gi, '');
+      .replace(/\sstyle="[^"]*"/gi, '')
+      .replace(/<p>\s*<\/p>/gi, '<p><br></p>');
   } catch (err) {
     return `<p class="text-red-500">Error rendering Markdown</p>`;
   }
