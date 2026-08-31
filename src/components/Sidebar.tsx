@@ -10,6 +10,7 @@ import {
   CheckSquare,
   ChevronDown,
   RefreshCw,
+  FolderOpen,
 } from 'lucide-react';
 import { Note, StorageMode } from '../types';
 import { NotePreview } from './NotePreview';
@@ -37,6 +38,7 @@ interface SidebarProps {
   onOpenSettingsModal?: () => void;
   storageMode?: StorageMode;
   onOpenSyncModal?: () => void;
+  onOpenLocalFile?: () => void;
   className?: string;
 }
 
@@ -53,6 +55,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onSearchChange,
   storageMode,
   onOpenSyncModal,
+  onOpenLocalFile,
   className = '',
 }) => {
   const [activeTab, setActiveTab] = useState<'notes' | 'blog' | 'trash'>('notes');
@@ -518,18 +521,20 @@ export const Sidebar: React.FC<SidebarProps> = ({
               )}
             </div>
 
-            {/* NEW NOTE / POST BUTTON ON SAME ROW */}
-            <button
-              type="button"
-              onClick={() => onNewNote(undefined, activeTab === 'blog' ? 'post' : 'note')}
-              className="flex items-center gap-1.5 px-2 py-1 text-xs font-sans font-semibold tracking-wide text-neutral-700 dark:text-neutral-300 hover:text-black dark:hover:text-white transition-colors"
-              title={activeTab === 'blog' ? `Create New Post (${modKey}+N)` : `Create New Note (${modKey}+N)`}
-            >
-              <Plus className="w-3.5 h-3.5" />
-              <span className="underline underline-offset-4 decoration-neutral-300 dark:decoration-neutral-700 hover:decoration-current">
-                {activeTab === 'blog' ? 'New post' : 'New note'}
-              </span>
-            </button>
+            {/* NEW NOTE / POST BUTTON */}
+            <div className="flex items-center">
+              <button
+                type="button"
+                onClick={() => onNewNote(undefined, activeTab === 'blog' ? 'post' : 'note')}
+                className="flex items-center gap-1.5 px-2 py-1 text-xs font-sans font-semibold tracking-wide text-neutral-700 dark:text-neutral-300 hover:text-black dark:hover:text-white transition-colors"
+                title={activeTab === 'blog' ? `Create New Post (${modKey}+N)` : `Create New Note (${modKey}+N)`}
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span className="underline underline-offset-4 decoration-neutral-300 dark:decoration-neutral-700 hover:decoration-current">
+                  {activeTab === 'blog' ? 'New post' : 'New note'}
+                </span>
+              </button>
+            </div>
           </div>
 
           {/* ROW 2: SEARCH BAR + SETTINGS BUTTON / SYNC STATUS */}

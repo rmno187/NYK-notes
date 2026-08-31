@@ -13,6 +13,8 @@ export const ShortcutsModal: React.FC<ShortcutsModalProps> = ({ isOpen, onClose 
 
   const shortcuts: KeyboardShortcut[] = [
     { combination: 'Alt/Option + N', description: 'New Note', key: 'n', category: 'General' },
+    { combination: 'Ctrl/Cmd + S', description: 'Save .md to local folder', key: 's', category: 'General' },
+    { combination: 'Ctrl/Cmd + O', description: 'Import / Open .md', key: 'o', category: 'General' },
     { combination: 'Ctrl/Cmd + F', description: 'Search', key: 'f', category: 'General' },
     { combination: 'Ctrl/Cmd + Shift + D', description: 'Dark/Light', key: 'd', category: 'General' },
     { combination: 'Ctrl/Cmd + Shift + B', description: 'Encrypted Backup', key: 'b', category: 'General' },

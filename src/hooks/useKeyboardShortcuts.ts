@@ -5,6 +5,8 @@ export interface ShortcutHandlers {
   onToggleDarkMode?: () => void;
   onToggleViewMode?: () => void;
   onSaveNote?: () => void;
+  onSaveLocalFile?: () => void;
+  onOpenLocalFile?: () => void;
   onFocusSearch?: () => void;
   onOpenBackupModal?: () => void;
   onOpenShortcutsModal?: () => void;
@@ -18,6 +20,20 @@ export function useKeyboardShortcuts(handlers: ShortcutHandlers) {
       const isCmdOrCtrl = e.metaKey || e.ctrlKey;
       const keyLower = e.key.toLowerCase();
       const editing = isEditingText(e);
+
+      // Ctrl/Cmd + S -> Save .md to local storage folder
+      if (isCmdOrCtrl && !e.shiftKey && keyLower === 's') {
+        e.preventDefault();
+        handlers.onSaveLocalFile?.();
+        return;
+      }
+
+      // Ctrl/Cmd + O -> Open .md from local storage
+      if (isCmdOrCtrl && !e.shiftKey && keyLower === 'o') {
+        e.preventDefault();
+        handlers.onOpenLocalFile?.();
+        return;
+      }
 
       // Alt/Option + N -> New Note (avoids browser Ctrl/Cmd+N window collision)
       if (e.altKey && keyLower === 'n') {

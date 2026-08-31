@@ -12,6 +12,7 @@ import {
 import { syncManager } from './lib/vercelSync/syncManager';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { convertHtmlToMarkdown, parseMarkdownNote, formatBlogDate } from './lib/markdown';
+import { saveNoteToLocalFolder, openLocalMarkdownFile } from './lib/localFileOperations';
 import { isMac, modSymbol } from './lib/platform';
 import { isNoteEmpty } from './lib/noteUtils';
 import { Sidebar } from './components/Sidebar';
@@ -108,7 +109,16 @@ export default function App() {
   const [editorMode, setEditorMode] = useState<EditorMode>('wysiwyg');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
   
+  const showToast = useCallback((msg: string) => {
+    setToastMessage(msg);
+    const timer = setTimeout(() => {
+      setToastMessage(null);
+    }, 3500);
+    return () => clearTimeout(timer);
+  }, []);
+
   const [isSearchMode, setIsSearchMode] = useState(false);
   const [mobileView, setMobileView] = useState<'list' | 'editor'>('list');
 
@@ -801,6 +811,7 @@ export default function App() {
     setNotes((prev) => [...newNotes, ...prev]);
     if (newNotes.length > 0) {
       setActiveNoteId(newNotes[0].id);
+      showToast(`Imported ${newNotes.length} note${newNotes.length === 1 ? '' : 's'}`);
     }
   };
 
@@ -818,8 +829,73 @@ export default function App() {
 
     if (restoredNotes.length > 0) {
       setActiveNoteId(restoredNotes[0].id);
+      showToast(`Restored ${restoredNotes.length} note${restoredNotes.length === 1 ? '' : 's'}`);
     }
   };
+
+  // Save Current Note as .md file to local folder
+  const handleSaveCurrentNoteToLocalFolder = useCallback(async () => {
+    if (!activeNote) return;
+    try {
+      const result = await saveNoteToLocalFolder(activeNote, directoryHandle);
+      if (result.directoryHandle && !directoryHandle) {
+        setDirectoryHandle(result.directoryHandle);
+        setDirectoryName(result.folderName || result.directoryHandle.name);
+      }
+      if (activeNote.fileName !== result.fileName) {
+        const updated = { ...activeNote, fileName: result.fileName };
+        setNotes((prev) => prev.map((n) => (n.id === activeNote.id ? updated : n)));
+        persistNote(updated);
+      }
+      if (result.folderName) {
+        showToast(`Saved "${result.fileName}" to "${result.folderName}"`);
+      } else {
+        showToast(`Saved "${result.fileName}"`);
+      }
+    } catch (err: any) {
+      if (err && err.name !== 'AbortError' && !err.message?.includes('cancelled')) {
+        showToast(`Save failed: ${err.message || 'Error'}`);
+      }
+    }
+  }, [activeNote, directoryHandle, persistNote, showToast]);
+
+  // Open .md note from local storage
+  const handleOpenLocalMarkdownFile = useCallback(async () => {
+    try {
+      const opened = await openLocalMarkdownFile();
+      if (!opened) return;
+
+      const existingIndex = notes.findIndex(
+        (n) =>
+          n.fileName === opened.fileName ||
+          (opened.note.title && n.title === opened.note.title && n.content === opened.note.content)
+      );
+
+      if (existingIndex !== -1) {
+        const existing = notes[existingIndex];
+        const updated: Note = {
+          ...existing,
+          ...opened.note,
+          id: existing.id,
+          updatedAt: Date.now(),
+        };
+        setNotes((prev) => prev.map((n) => (n.id === existing.id ? updated : n)));
+        setActiveNoteId(existing.id);
+        persistNote(updated);
+        showToast(`Opened "${opened.fileName}"`);
+      } else {
+        setNotes((prev) => [opened.note, ...prev]);
+        setActiveNoteId(opened.note.id);
+        persistNote(opened.note);
+        showToast(`Opened "${opened.fileName}"`);
+      }
+      setMobileView('editor');
+    } catch (err: any) {
+      if (err && err.name !== 'AbortError' && !err.message?.includes('cancelled')) {
+        showToast(`Open failed: ${err.message || 'Error'}`);
+      }
+    }
+  }, [notes, persistNote, showToast]);
 
   // Toggle Dark Mode
   const handleToggleTheme = useCallback(() => {
@@ -834,6 +910,8 @@ export default function App() {
   // Keyboard Shortcuts Hook
   useKeyboardShortcuts({
     onNewNote: handleNewNote,
+    onSaveLocalFile: handleSaveCurrentNoteToLocalFolder,
+    onOpenLocalFile: () => setIsImportModalOpen(true),
     onToggleDarkMode: handleToggleTheme,
     onToggleViewMode: handleToggleEditorMode,
     onSaveNote: () => {
@@ -879,6 +957,7 @@ export default function App() {
           onToggleSearchMode={() => setIsSearchMode((prev) => !prev)}
           storageMode={storageMode}
           onOpenSyncModal={() => setIsSyncModalOpen(true)}
+          onOpenLocalFile={handleOpenLocalMarkdownFile}
           className={mobileView === 'editor' ? 'hidden md:flex w-full md:w-80' : 'flex w-full md:w-80'}
         />
 
@@ -891,6 +970,9 @@ export default function App() {
               onChangeEditorMode={setEditorMode}
               onToggleEditorMode={handleToggleEditorMode}
               onBackToList={handleBackToList}
+              onSaveToLocalFolder={handleSaveCurrentNoteToLocalFolder}
+              onOpenLocalFile={handleOpenLocalMarkdownFile}
+              toastMessage={toastMessage}
               onChangeTitle={handleTitleChange}
               onChangeContent={handleContentChange}
               onChangeDescription={handleDescriptionChange}

@@ -15,6 +15,12 @@ const turndown = new TurndownService({
   strongDelimiter: '**',
 });
 
+// Add rule for underline conversion in Turndown
+turndown.addRule('underline', {
+  filter: ['u', 'ins'],
+  replacement: (content) => `<u>${content}</u>`,
+});
+
 // Add rule for task lists checkbox inputs
 turndown.addRule('taskListInputs', {
   filter: (node) => {
@@ -365,7 +371,7 @@ export function applyFormatting(
   text: string,
   selectionStart: number,
   selectionEnd: number,
-  type: 'bold' | 'italic' | 'heading' | 'h2' | 'paragraph' | 'code' | 'quote' | 'link' | 'bullet' | 'number' | 'task' | 'table' | 'hr'
+  type: 'bold' | 'italic' | 'underline' | 'heading' | 'h2' | 'paragraph' | 'code' | 'quote' | 'link' | 'bullet' | 'number' | 'task' | 'table' | 'hr'
 ): { text: string; newStart: number; newEnd: number } {
   const before = text.slice(0, selectionStart);
   const selected = text.slice(selectionStart, selectionEnd) || 'text';
@@ -391,6 +397,13 @@ export function applyFormatting(
       newText = before + prefix + selected + suffix + after;
       cursorOffsetStart = selectionStart + 1;
       cursorOffsetEnd = selectionEnd + 1;
+      break;
+    case 'underline':
+      prefix = '<u>';
+      suffix = '</u>';
+      newText = before + prefix + selected + suffix + after;
+      cursorOffsetStart = selectionStart + 3;
+      cursorOffsetEnd = selectionEnd + 3;
       break;
     case 'code':
       if (selected.includes('\n')) {

@@ -8,8 +8,6 @@ import {
   Heading2,
   Code,
   Quote,
-  List,
-  ListOrdered,
   CheckSquare,
   Link,
   Table,
@@ -17,15 +15,18 @@ import {
   Tag as TagIcon,
   X,
   Pin,
-
   Undo,
   Redo,
   ArrowLeft,
+  FolderDown,
+  FolderOpen,
+  FileText,
+  Check,
 } from 'lucide-react';
 import { Note, EditorMode, StorageMode, Theme } from '../types';
 import { modSymbol } from '../lib/platform';
-
 import { renderMarkdownToHtml, convertHtmlToMarkdown, applyFormatting } from '../lib/markdown';
+import { generateNoteFilename } from '../lib/localFileOperations';
 
 interface EditorPaneProps {
   note: Note;
@@ -41,6 +42,10 @@ interface EditorPaneProps {
   onChangeEditorMode?: (mode: EditorMode) => void;
   onToggleEditorMode?: () => void;
   onBackToList?: () => void;
+  // Local File System / Folder Ops
+  onSaveToLocalFolder?: () => Promise<void> | void;
+  onOpenLocalFile?: () => Promise<void> | void;
+  toastMessage?: string | null;
   // Blog Post Fields
   onChangeDescription?: (description: string) => void;
   onChangeAuthor?: (author: string) => void;
@@ -128,6 +133,9 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
   onChangeEditorMode,
   onToggleEditorMode,
   onBackToList,
+  onSaveToLocalFolder,
+  onOpenLocalFile,
+  toastMessage,
   onChangeDescription,
   onChangeAuthor,
   onToggleFeatured,
@@ -258,6 +266,25 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
     }
   }, [note.id, note.title, note.content, focusContent]);
 
+  // Helper to strip leading text prefix from a DocumentFragment while preserving rich markup
+  const stripLeadingPrefixFromFragment = useCallback((frag: DocumentFragment, prefixLength: number) => {
+    let remaining = prefixLength;
+    const walker = document.createTreeWalker(frag, NodeFilter.SHOW_TEXT);
+    let textNode = walker.nextNode() as Text | null;
+    while (textNode && remaining > 0) {
+      const val = textNode.nodeValue || '';
+      if (val.length <= remaining) {
+        remaining -= val.length;
+        const next = walker.nextNode() as Text | null;
+        textNode.remove();
+        textNode = next;
+      } else {
+        textNode.nodeValue = val.substring(remaining);
+        remaining = 0;
+      }
+    }
+  }, []);
+
   // Helper to find block node and check if cursor is at start
   const getCaretBlockAndOffset = useCallback((container: HTMLElement) => {
     const sel = window.getSelection();
@@ -269,7 +296,7 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
     let blockNode: HTMLElement | null = null;
     while (node && node !== container) {
       const tag = (node as HTMLElement).tagName?.toUpperCase();
-      if (['H1', 'H2', 'H3', 'BLOCKQUOTE', 'PRE', 'LI', 'P'].includes(tag)) {
+      if (['H1', 'H2', 'H3', 'BLOCKQUOTE', 'PRE', 'LI', 'P', 'DIV'].includes(tag)) {
         blockNode = node as HTMLElement;
         break;
       }
@@ -354,6 +381,7 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
         if (tag === 'BLOCKQUOTE') isQuote = true;
         if (tag === 'PRE' || tag === 'CODE') isCode = true;
         if (tag === 'A') isLink = true;
+        if (tag === 'U' || tag === 'INS') isUnderline = true;
         if (
           tag === 'LI' &&
           ((node as HTMLElement).classList.contains('task-list-item') ||
@@ -549,19 +577,51 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
   const [savedRange, setSavedRange] = useState<Range | null>(null);
   const [savedTextareaSel, setSavedTextareaSel] = useState<{ start: number; end: number } | null>(null);
 
-  // Sync selection changes to update active button styles
-  useEffect(() => {
-    if (mode !== 'wysiwyg') return;
+  // Track whether text is currently highlighted / selected for dynamic minimalist toolbar
+  const [hasTextSelection, setHasTextSelection] = useState(false);
 
+  const updateSelectionState = useCallback(() => {
+    if (mode === 'wysiwyg') {
+      if (!wysiwygRef.current) {
+        setHasTextSelection(false);
+        return;
+      }
+      const sel = window.getSelection();
+      if (sel && !sel.isCollapsed && sel.rangeCount > 0) {
+        const isInside =
+          (sel.anchorNode && wysiwygRef.current.contains(sel.anchorNode)) ||
+          (sel.focusNode && wysiwygRef.current.contains(sel.focusNode));
+        const str = sel.toString();
+        setHasTextSelection(Boolean(isInside && str && str.trim().length > 0));
+      } else {
+        setHasTextSelection(false);
+      }
+    } else if (mode === 'markdown') {
+      if (textareaRef.current) {
+        const start = textareaRef.current.selectionStart;
+        const end = textareaRef.current.selectionEnd;
+        const hasSel = typeof start === 'number' && typeof end === 'number' && end > start;
+        setHasTextSelection(hasSel);
+      } else {
+        setHasTextSelection(false);
+      }
+    }
+  }, [mode]);
+
+  // Sync selection changes to update active button styles and dynamic toolbar mode
+  useEffect(() => {
     const handleSelectionChange = () => {
-      checkActiveFormats();
+      if (mode === 'wysiwyg') {
+        checkActiveFormats();
+      }
+      updateSelectionState();
     };
 
     document.addEventListener('selectionchange', handleSelectionChange);
     return () => {
       document.removeEventListener('selectionchange', handleSelectionChange);
     };
-  }, [mode, checkActiveFormats]);
+  }, [mode, checkActiveFormats, updateSelectionState]);
 
   // Handle Paste in WYSIWYG editor to sanitize rich text, remove inline color/background styling,
   // and ensure seamless rendering in both light and dark mode.
@@ -681,20 +741,34 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
   // Unified WYSIWYG block formatting helper
   const applyWysiwygBlockFormat = (targetType: string) => {
     if (!wysiwygRef.current) return;
+
+    // Ensure wysiwyg has focus
+    wysiwygRef.current.focus();
+
     const sel = window.getSelection();
     if (!sel || sel.rangeCount === 0) return;
     const range = sel.getRangeAt(0);
 
-    // Candidate block elements inside wysiwygRef.current
-    const allNodes = Array.from(
-      wysiwygRef.current.querySelectorAll('li, p, h1, h2, h3, h4, h5, h6, blockquote, pre, div')
+    // Save caret offset before DOM mutations to guarantee exact restoration
+    const savedCaretOffset = getCaretCharacterOffsetWithin(wysiwygRef.current);
+
+    // Wrap any top-level bare text nodes in <p> to maintain valid block structure
+    (Array.from(wysiwygRef.current.childNodes) as ChildNode[]).forEach((child) => {
+      if (child.nodeType === Node.TEXT_NODE && child.textContent?.trim()) {
+        const p = document.createElement('p');
+        p.textContent = child.textContent;
+        child.replaceWith(p);
+      }
+    });
+
+    // Collect all candidate block elements inside wysiwygRef.current
+    const allBlocks = Array.from(
+      wysiwygRef.current.querySelectorAll('li, p, h1, h2, h3, h4, h5, h6, blockquote, pre')
     ) as HTMLElement[];
 
-    // Filter to nodes that intersect range or contain selection endpoints
-    let selectedNodes = allNodes.filter((node) => {
-      if (node.tagName === 'UL' || node.tagName === 'OL') return false;
-      if (node.tagName === 'DIV' && node.querySelector('p, li, h1, h2, h3, blockquote, pre')) return false;
-
+    // Filter to blocks that intersect the selection range
+    let selectedNodes = allBlocks.filter((node) => {
+      if (node.tagName === 'DIV') return false;
       try {
         return range.intersectsNode(node);
       } catch {
@@ -702,18 +776,28 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
       }
     });
 
-    // Fallback if range.intersectsNode didn't catch anything (e.g. collapsed cursor in empty line)
+    // Fallback: if intersectsNode returned nothing (e.g. collapsed cursor in empty block or start/end boundary)
     if (selectedNodes.length === 0 && sel.anchorNode) {
       let curr: Node | null = sel.anchorNode.nodeType === Node.TEXT_NODE ? sel.anchorNode.parentNode : sel.anchorNode;
-      const block = (curr as HTMLElement)?.closest('li, p, h1, h2, h3, h4, h5, h6, blockquote, pre, div');
-      if (block) {
+      const block = (curr as HTMLElement)?.closest('li, p, h1, h2, h3, h4, h5, h6, blockquote, pre');
+      if (block && wysiwygRef.current.contains(block)) {
         selectedNodes = [block as HTMLElement];
       }
     }
 
-    if (selectedNodes.length === 0) return;
+    // If still empty, default to the first child or create a paragraph
+    if (selectedNodes.length === 0) {
+      if (wysiwygRef.current.firstElementChild) {
+        selectedNodes = [wysiwygRef.current.firstElementChild as HTMLElement];
+      } else {
+        const p = document.createElement('p');
+        p.innerHTML = '<br>';
+        wysiwygRef.current.appendChild(p);
+        selectedNodes = [p];
+      }
+    }
 
-    // Helper to determine format of a node
+    // Helper to determine the current format of a block node
     const getNodeFormat = (node: HTMLElement) => {
       if (node.tagName === 'LI') {
         if (node.classList.contains('task-list-item') || node.querySelector('input[type="checkbox"]')) {
@@ -735,139 +819,145 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
     const allMatch = selectedNodes.every((node) => getNodeFormat(node) === targetType);
     const finalFormat = allMatch ? 'paragraph' : targetType;
 
-    // Extract cleaned content
-    const items = selectedNodes.map((node) => {
+    // Helper to extract clean inner HTML content without list markers or raw prefixes
+    const getCleanContent = (node: HTMLElement) => {
       const clone = node.cloneNode(true) as HTMLElement;
       clone.querySelectorAll('input[type="checkbox"]').forEach((cb) => cb.remove());
       let content = clone.innerHTML.trim();
-      // Clean off any raw prefix like [ ], [/], [x], [X], •, -, * from HTML string
       content = content.replace(/^(\s*\[[\s\S]?\]|\s*[-*+•])\s*/i, '');
       if (!content) content = '<br>';
-      return { node, content };
-    });
+      return content;
+    };
 
-    // Build new DOM element(s) based on finalFormat
-    let newElements: HTMLElement[] = [];
+    const isTargetList = finalFormat === 'task' || finalFormat === 'bullet' || finalFormat === 'number';
 
-    if (finalFormat === 'task') {
-      const ul = document.createElement('ul');
-      ul.className = 'contains-task-list';
-      items.forEach(({ content }) => {
-        const li = document.createElement('li');
-        li.className = 'task-list-item';
-        li.innerHTML = `<input type="checkbox" /> ${content}`;
-        ul.appendChild(li);
-      });
-      newElements = [ul];
-    } else if (finalFormat === 'bullet') {
-      const ul = document.createElement('ul');
-      items.forEach(({ content }) => {
-        const li = document.createElement('li');
-        li.innerHTML = content;
-        ul.appendChild(li);
-      });
-      newElements = [ul];
-    } else if (finalFormat === 'number') {
-      const ol = document.createElement('ol');
-      items.forEach(({ content }) => {
-        const li = document.createElement('li');
-        li.innerHTML = content;
-        ol.appendChild(li);
-      });
-      newElements = [ol];
-    } else if (finalFormat === 'heading') {
-      newElements = items.map(({ content }) => {
-        const h1 = document.createElement('h1');
-        h1.innerHTML = content;
-        return h1;
-      });
-    } else if (finalFormat === 'h2') {
-      newElements = items.map(({ content }) => {
-        const h2 = document.createElement('h2');
-        h2.innerHTML = content;
-        return h2;
-      });
-    } else if (finalFormat === 'quote') {
-      newElements = items.map(({ content }) => {
-        const bq = document.createElement('blockquote');
-        bq.innerHTML = content;
-        return bq;
-      });
-    } else if (finalFormat === 'code') {
-      const pre = document.createElement('pre');
-      pre.innerHTML = items.map((i) => i.content).join('<br>');
-      newElements = [pre];
-    } else {
-      // paragraph
-      newElements = items.map(({ content }) => {
-        const p = document.createElement('p');
-        p.innerHTML = content;
-        return p;
-      });
-    }
+    if (isTargetList) {
+      // Group contiguous selected nodes and convert to list
+      const groups: HTMLElement[][] = [];
+      let currentGroup: HTMLElement[] = [];
 
-    // Insert newElements at exact position and cleanup selectedNodes
-    const firstNode = selectedNodes[0];
-    const firstParentList = firstNode.tagName === 'LI' ? firstNode.parentElement : null;
-
-    if (firstParentList && (firstParentList.tagName === 'UL' || firstParentList.tagName === 'OL')) {
-      const allLis = Array.from(firstParentList.children) as HTMLElement[];
-      const selectedLisInFirstList = selectedNodes.filter((n) => n.parentElement === firstParentList);
-
-      const firstSelIdx = allLis.indexOf(selectedLisInFirstList[0]);
-      const lastSelIdx = allLis.indexOf(selectedLisInFirstList[selectedLisInFirstList.length - 1]);
-
-      const unselectedBefore = allLis.slice(0, firstSelIdx);
-      const unselectedAfter = allLis.slice(lastSelIdx + 1);
-
-      if (unselectedAfter.length > 0) {
-        const trailingList = document.createElement(firstParentList.tagName) as HTMLElement;
-        trailingList.className = firstParentList.className;
-        unselectedAfter.forEach((li) => trailingList.appendChild(li));
-        if (firstParentList.nextSibling) {
-          firstParentList.parentNode?.insertBefore(trailingList, firstParentList.nextSibling);
+      selectedNodes.forEach((node) => {
+        if (currentGroup.length === 0) {
+          currentGroup.push(node);
         } else {
-          firstParentList.parentNode?.appendChild(trailingList);
+          const prev = currentGroup[currentGroup.length - 1];
+          if (prev.nextElementSibling === node || prev.parentElement === node.parentElement) {
+            currentGroup.push(node);
+          } else {
+            groups.push(currentGroup);
+            currentGroup = [node];
+          }
         }
+      });
+      if (currentGroup.length > 0) {
+        groups.push(currentGroup);
       }
 
-      if (unselectedBefore.length > 0) {
-        // Insert newElements after firstParentList
-        newElements.slice().reverse().forEach((el) => {
-          if (firstParentList.nextSibling) {
-            firstParentList.parentNode?.insertBefore(el, firstParentList.nextSibling);
+      groups.forEach((group) => {
+        const first = group[0];
+        const isOl = finalFormat === 'number';
+        const listEl = document.createElement(isOl ? 'ol' : 'ul');
+        if (finalFormat === 'task') {
+          listEl.className = 'contains-task-list';
+        }
+
+        group.forEach((node) => {
+          const content = getCleanContent(node);
+          const li = document.createElement('li');
+          if (finalFormat === 'task') {
+            li.className = 'task-list-item';
+            li.innerHTML = `<input type="checkbox" /> ${content}`;
           } else {
-            firstParentList.parentNode?.appendChild(el);
+            li.innerHTML = content;
           }
+          listEl.appendChild(li);
         });
-      } else {
-        // Insert newElements before firstParentList
-        newElements.forEach((el) => {
-          firstParentList.parentNode?.insertBefore(el, firstParentList);
-        });
-      }
+
+        // Insert listEl in place of the group
+        const parentList = first.tagName === 'LI' ? first.parentElement : null;
+        if (parentList && (parentList.tagName === 'UL' || parentList.tagName === 'OL')) {
+          parentList.replaceWith(listEl);
+        } else {
+          first.replaceWith(listEl);
+          group.slice(1).forEach((node) => node.remove());
+        }
+      });
     } else {
-      // Top level block element
-      const topLevelAnchor = firstNode;
-      newElements.forEach((el) => {
-        topLevelAnchor.parentNode?.insertBefore(el, topLevelAnchor);
+      // Converting to top-level block (p, h1, h2, quote, code)
+      selectedNodes.forEach((node) => {
+        const content = getCleanContent(node);
+        let newBlock: HTMLElement;
+
+        switch (finalFormat) {
+          case 'heading':
+            newBlock = document.createElement('h1');
+            newBlock.innerHTML = content;
+            break;
+          case 'h2':
+            newBlock = document.createElement('h2');
+            newBlock.innerHTML = content;
+            break;
+          case 'quote':
+            newBlock = document.createElement('blockquote');
+            newBlock.innerHTML = content;
+            break;
+          case 'code':
+            newBlock = document.createElement('pre');
+            newBlock.innerHTML = content;
+            break;
+          default:
+            newBlock = document.createElement('p');
+            newBlock.innerHTML = content;
+            break;
+        }
+
+        if (node.tagName === 'LI' && node.parentElement) {
+          const listParent = node.parentElement;
+          const allLis = Array.from(listParent.children);
+          const idx = allLis.indexOf(node);
+
+          if (allLis.length === 1) {
+            // Only item in list: replace entire list
+            listParent.replaceWith(newBlock);
+          } else if (idx === 0) {
+            // First item: insert before list
+            listParent.before(newBlock);
+            node.remove();
+          } else if (idx === allLis.length - 1) {
+            // Last item: insert after list
+            listParent.after(newBlock);
+            node.remove();
+          } else {
+            // Middle item: split the list into two
+            const secondList = document.createElement(listParent.tagName);
+            secondList.className = listParent.className;
+            allLis.slice(idx + 1).forEach((li) => secondList.appendChild(li));
+            node.remove();
+            listParent.after(newBlock);
+            newBlock.after(secondList);
+          }
+        } else {
+          // Standard top-level block: direct in-place replacement
+          node.replaceWith(newBlock);
+        }
       });
     }
 
-    // Now remove all selectedNodes and cleanup empty parent lists
-    const listsToCheck = new Set<HTMLElement>();
-    selectedNodes.forEach((node) => {
-      if (node.tagName === 'LI' && node.parentElement) {
-        listsToCheck.add(node.parentElement as HTMLElement);
-      }
-      node.remove();
-    });
-
-    listsToCheck.forEach((list) => {
+    // Clean up any empty lists left behind
+    wysiwygRef.current.querySelectorAll('ul, ol').forEach((list) => {
       if (list.children.length === 0) {
         list.remove();
       }
     });
+
+    // Ensure wysiwyg is not completely empty
+    if (!wysiwygRef.current.hasChildNodes() || wysiwygRef.current.innerHTML.trim() === '') {
+      wysiwygRef.current.innerHTML = '<p><br></p>';
+    }
+
+    // Restore caret position and focus
+    wysiwygRef.current.focus();
+    setCaretCharacterOffsetWithin(wysiwygRef.current, savedCaretOffset);
 
     handleWysiwygInput();
     checkActiveFormats();
@@ -875,7 +965,7 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
 
   // Formatting actions
   const handleFormat = (
-    type: 'bold' | 'italic' | 'heading' | 'h2' | 'code' | 'quote' | 'link' | 'bullet' | 'number' | 'task' | 'paragraph' | 'table' | 'hr'
+    type: 'bold' | 'italic' | 'underline' | 'heading' | 'h2' | 'code' | 'quote' | 'link' | 'bullet' | 'number' | 'task' | 'paragraph' | 'table' | 'hr'
   ) => {
     if (mode === 'wysiwyg' && wysiwygRef.current) {
       wysiwygRef.current.focus();
@@ -886,6 +976,9 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
           break;
         case 'italic':
           document.execCommand('italic', false);
+          break;
+        case 'underline':
+          document.execCommand('underline', false);
           break;
         case 'paragraph':
         case 'heading':
@@ -1248,6 +1341,168 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
         return;
       }
 
+      // Auto-list triggers in Paragraph or Div: "1. Testing|", "- Testing|", "* Testing|", "+ Testing|", "[ ] Testing|"
+      const sel = window.getSelection();
+      if (
+        sel &&
+        sel.rangeCount > 0 &&
+        tag !== 'H1' &&
+        tag !== 'H2' &&
+        tag !== 'H3' &&
+        tag !== 'BLOCKQUOTE' &&
+        tag !== 'PRE' &&
+        tag !== 'CODE'
+      ) {
+        const range = sel.getRangeAt(0);
+
+        const preRange = document.createRange();
+        preRange.selectNodeContents(blockNode);
+        preRange.setEnd(range.startContainer, range.startOffset);
+        const textBefore = preRange.toString();
+
+        const postRange = document.createRange();
+        postRange.selectNodeContents(blockNode);
+        postRange.setStart(range.endContainer, range.endOffset);
+
+        // 1) Numbered List Pattern: "1. Testing" or "1) Testing"
+        const numMatch = textBefore.match(/^(\s*)(\d+)([.)])\s*(.*)$/);
+        if (numMatch) {
+          e.preventDefault();
+          const fullPrefixMatch = textBefore.match(/^(\s*\d+[.)]\s*)/);
+          const prefixLen = fullPrefixMatch ? fullPrefixMatch[0].length : 3;
+
+          const beforeFrag = preRange.cloneContents();
+          stripLeadingPrefixFromFragment(beforeFrag, prefixLen);
+
+          const afterFrag = postRange.cloneContents();
+
+          const ol = document.createElement('ol');
+          const firstLi = document.createElement('li');
+          firstLi.appendChild(beforeFrag);
+          if (!firstLi.textContent?.trim() && firstLi.childNodes.length === 0) {
+            firstLi.innerHTML = '<br>';
+          }
+
+          const secondLi = document.createElement('li');
+          secondLi.appendChild(afterFrag);
+          if (!secondLi.textContent?.trim() && secondLi.childNodes.length === 0) {
+            secondLi.innerHTML = '<br>';
+          }
+
+          ol.appendChild(firstLi);
+          ol.appendChild(secondLi);
+
+          blockNode.parentNode?.replaceChild(ol, blockNode);
+
+          const targetRange = document.createRange();
+          targetRange.selectNodeContents(secondLi);
+          targetRange.collapse(true);
+          sel.removeAllRanges();
+          sel.addRange(targetRange);
+
+          handleWysiwygInput();
+          checkActiveFormats();
+          return;
+        }
+
+        // 2) Bullet List Pattern: "- Testing", "* Testing", "+ Testing", "• Testing"
+        const bulletMatch = textBefore.match(/^(\s*)([-*+•])\s*(.*)$/);
+        if (bulletMatch) {
+          e.preventDefault();
+          const fullPrefixMatch = textBefore.match(/^(\s*[-*+•]\s*)/);
+          const prefixLen = fullPrefixMatch ? fullPrefixMatch[0].length : 2;
+
+          const beforeFrag = preRange.cloneContents();
+          stripLeadingPrefixFromFragment(beforeFrag, prefixLen);
+
+          const afterFrag = postRange.cloneContents();
+
+          const ul = document.createElement('ul');
+          const firstLi = document.createElement('li');
+          firstLi.appendChild(beforeFrag);
+          if (!firstLi.textContent?.trim() && firstLi.childNodes.length === 0) {
+            firstLi.innerHTML = '<br>';
+          }
+
+          const secondLi = document.createElement('li');
+          secondLi.appendChild(afterFrag);
+          if (!secondLi.textContent?.trim() && secondLi.childNodes.length === 0) {
+            secondLi.innerHTML = '<br>';
+          }
+
+          ul.appendChild(firstLi);
+          ul.appendChild(secondLi);
+
+          blockNode.parentNode?.replaceChild(ul, blockNode);
+
+          const targetRange = document.createRange();
+          targetRange.selectNodeContents(secondLi);
+          targetRange.collapse(true);
+          sel.removeAllRanges();
+          sel.addRange(targetRange);
+
+          handleWysiwygInput();
+          checkActiveFormats();
+          return;
+        }
+
+        // 3) Task List Pattern: "[ ] Testing" or "- [ ] Testing"
+        const taskMatch = textBefore.match(/^(\s*(?:\[[\s_]?\]|[-*+]\s*\[[\s_]?\])\s*)/i);
+        if (taskMatch) {
+          e.preventDefault();
+          const prefixLen = taskMatch[0].length;
+
+          const beforeFrag = preRange.cloneContents();
+          stripLeadingPrefixFromFragment(beforeFrag, prefixLen);
+
+          const afterFrag = postRange.cloneContents();
+
+          const ul = document.createElement('ul');
+          ul.className = 'contains-task-list';
+
+          const firstLi = document.createElement('li');
+          firstLi.className = 'task-list-item';
+          const cb1 = document.createElement('input');
+          cb1.type = 'checkbox';
+          firstLi.appendChild(cb1);
+          firstLi.appendChild(document.createTextNode(' '));
+          firstLi.appendChild(beforeFrag);
+          if (firstLi.childNodes.length <= 2 && !firstLi.textContent?.trim()) {
+            firstLi.appendChild(document.createElement('br'));
+          }
+
+          const secondLi = document.createElement('li');
+          secondLi.className = 'task-list-item';
+          const cb2 = document.createElement('input');
+          cb2.type = 'checkbox';
+          secondLi.appendChild(cb2);
+          secondLi.appendChild(document.createTextNode(' '));
+          secondLi.appendChild(afterFrag);
+          if (secondLi.childNodes.length <= 2 && !secondLi.textContent?.trim()) {
+            secondLi.appendChild(document.createElement('br'));
+          }
+
+          ul.appendChild(firstLi);
+          ul.appendChild(secondLi);
+
+          blockNode.parentNode?.replaceChild(ul, blockNode);
+
+          const targetRange = document.createRange();
+          if (secondLi.childNodes.length > 2) {
+            targetRange.setStart(secondLi.childNodes[2], 0);
+          } else {
+            targetRange.selectNodeContents(secondLi);
+            targetRange.collapse(false);
+          }
+          sel.removeAllRanges();
+          sel.addRange(targetRange);
+
+          handleWysiwygInput();
+          checkActiveFormats();
+          return;
+        }
+      }
+
       // Heading: Enter converts new line to <p> so user isn't stuck in heading style
       if (tag === 'H1' || tag === 'H2' || tag === 'H3') {
         const sel = window.getSelection();
@@ -1341,21 +1596,54 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
       const tag = blockNode.tagName.toUpperCase();
 
       if (isAtStart) {
-        // Backspace at start of LI (bullet/number/task) converts to standard paragraph
+        // Backspace at start of LI (e.g. "1. |Testing" or "- |Testing") converts back to standard paragraph
         if (tag === 'LI') {
           e.preventDefault();
-          const clone = blockNode.cloneNode(true) as HTMLElement;
-          const checkbox = clone.querySelector('input[type="checkbox"]');
-          if (checkbox) checkbox.remove();
-          const text = clone.textContent || '';
-
           const parentList = blockNode.closest('ul, ol');
-          const p = document.createElement('p');
-          p.textContent = text;
-          if (!p.textContent) p.innerHTML = '<br>';
+          if (!parentList) return;
 
-          blockNode.parentNode?.replaceChild(p, blockNode);
-          if (parentList && parentList.children.length === 0) {
+          const clone = blockNode.cloneNode(true) as HTMLElement;
+          clone.querySelectorAll('input[type="checkbox"]').forEach((cb) => cb.remove());
+
+          const p = document.createElement('p');
+          while (clone.firstChild) {
+            p.appendChild(clone.firstChild);
+          }
+          if (!p.textContent?.trim() && p.childNodes.length === 0) {
+            p.innerHTML = '<br>';
+          }
+
+          const allLis = Array.from(parentList.children) as HTMLElement[];
+          const currIdx = allLis.indexOf(blockNode);
+
+          const lisBefore = allLis.slice(0, currIdx);
+          const lisAfter = allLis.slice(currIdx + 1);
+
+          // Handle subsequent list items if any
+          if (lisAfter.length > 0) {
+            const trailingList = document.createElement(parentList.tagName) as HTMLElement;
+            trailingList.className = parentList.className;
+            lisAfter.forEach((li) => trailingList.appendChild(li));
+            if (parentList.nextSibling) {
+              parentList.parentNode?.insertBefore(trailingList, parentList.nextSibling);
+            } else {
+              parentList.parentNode?.appendChild(trailingList);
+            }
+          }
+
+          // Insert paragraph
+          if (lisBefore.length > 0) {
+            if (parentList.nextSibling) {
+              parentList.parentNode?.insertBefore(p, parentList.nextSibling);
+            } else {
+              parentList.parentNode?.appendChild(p);
+            }
+          } else {
+            parentList.parentNode?.insertBefore(p, parentList);
+          }
+
+          blockNode.remove();
+          if (lisBefore.length === 0) {
             parentList.remove();
           }
 
@@ -1379,6 +1667,27 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
           handleWysiwygInput();
           checkActiveFormats();
           return;
+        }
+      }
+
+      // Backspace right after typed prefix like "1. |" or "- |" in paragraph
+      if (tag === 'P' || tag === 'DIV') {
+        const sel = window.getSelection();
+        if (sel && sel.rangeCount > 0 && sel.isCollapsed) {
+          const range = sel.getRangeAt(0);
+          const preRange = document.createRange();
+          preRange.selectNodeContents(blockNode);
+          preRange.setEnd(range.startContainer, range.startOffset);
+          const textBefore = preRange.toString();
+
+          const prefixMatch = textBefore.match(/^(\s*(?:\d+[.)]|[-*+•])\s+)$/);
+          if (prefixMatch) {
+            e.preventDefault();
+            preRange.deleteContents();
+            handleWysiwygInput();
+            checkActiveFormats();
+            return;
+          }
         }
       }
     }
@@ -1414,6 +1723,103 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
       } else if (keyLower === 'h') {
         e.preventDefault();
         handleFormat('heading');
+      }
+    }
+
+    // Markdown Enter handling for lists (1. Testing -> next line 2. , - Testing -> next line - )
+    if (e.key === 'Enter' && !e.shiftKey) {
+      const textarea = textareaRef.current;
+      if (textarea) {
+        const start = textarea.selectionStart;
+        const end = textarea.selectionEnd;
+        if (start === end) {
+          const val = note.content;
+          const lineStart = val.lastIndexOf('\n', start - 1) + 1;
+          const currentLine = val.substring(lineStart, start);
+
+          // Numbered list: "1. Testing" or "1. "
+          const numMatch = currentLine.match(/^(\s*)(\d+)([.)])\s*(.*)$/);
+          if (numMatch) {
+            e.preventDefault();
+            const indent = numMatch[1];
+            const num = parseInt(numMatch[2], 10);
+            const delimiter = numMatch[3];
+            const itemContent = numMatch[4];
+
+            if (!itemContent.trim()) {
+              // Empty list item: exit list
+              const updated = val.substring(0, lineStart) + indent + val.substring(start);
+              onChangeContent(updated);
+              setTimeout(() => {
+                textarea.selectionStart = textarea.selectionEnd = lineStart + indent.length;
+              }, 0);
+              return;
+            } else {
+              // Continue numbered list
+              const nextPrefix = `\n${indent}${num + 1}${delimiter} `;
+              const updated = val.substring(0, start) + nextPrefix + val.substring(end);
+              onChangeContent(updated);
+              setTimeout(() => {
+                textarea.selectionStart = textarea.selectionEnd = start + nextPrefix.length;
+              }, 0);
+              return;
+            }
+          }
+
+          // Bullet list: "- Testing" or "- "
+          const bulletMatch = currentLine.match(/^(\s*)([-*+])\s*(.*)$/);
+          if (bulletMatch) {
+            e.preventDefault();
+            const indent = bulletMatch[1];
+            const bullet = bulletMatch[2];
+            const itemContent = bulletMatch[3];
+
+            if (!itemContent.trim()) {
+              // Empty bullet: exit list
+              const updated = val.substring(0, lineStart) + indent + val.substring(start);
+              onChangeContent(updated);
+              setTimeout(() => {
+                textarea.selectionStart = textarea.selectionEnd = lineStart + indent.length;
+              }, 0);
+              return;
+            } else {
+              // Continue bullet list
+              const nextPrefix = `\n${indent}${bullet} `;
+              const updated = val.substring(0, start) + nextPrefix + val.substring(end);
+              onChangeContent(updated);
+              setTimeout(() => {
+                textarea.selectionStart = textarea.selectionEnd = start + nextPrefix.length;
+              }, 0);
+              return;
+            }
+          }
+        }
+      }
+    }
+
+    // Markdown Backspace handling to delete list formatting
+    if (e.key === 'Backspace') {
+      const textarea = textareaRef.current;
+      if (textarea) {
+        const start = textarea.selectionStart;
+        const end = textarea.selectionEnd;
+        if (start === end) {
+          const val = note.content;
+          const lineStart = val.lastIndexOf('\n', start - 1) + 1;
+          const lineBeforeCursor = val.substring(lineStart, start);
+
+          // If cursor is right after marker: "1. |" or "- |"
+          const markerMatch = lineBeforeCursor.match(/^(\s*(?:\d+[.)]|[-*+])\s+)$/);
+          if (markerMatch) {
+            e.preventDefault();
+            const updated = val.substring(0, lineStart) + val.substring(start);
+            onChangeContent(updated);
+            setTimeout(() => {
+              textarea.selectionStart = textarea.selectionEnd = lineStart;
+            }, 0);
+            return;
+          }
+        }
       }
     }
 
@@ -1481,52 +1887,27 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
           <div className="flex items-center space-x-2 flex-1 min-w-0">
             {onBackToList && (
               <button
-  onClick={onBackToList}
-  className="md:hidden p-1.5 -ml-1 text-neutral-500 dark:text-neutral-400 hover:text-black dark:hover:text-white transition-colors flex items-center shrink-0"
-  title="Back to Notes"
->
-  <ArrowLeft className="w-4 h-4" />
+                onClick={onBackToList}
+                className="md:hidden p-1.5 -ml-1 text-neutral-500 dark:text-neutral-400 hover:text-black dark:hover:text-white transition-colors flex items-center shrink-0"
+                title="Back to Notes"
+              >
+                <ArrowLeft className="w-4 h-4" />
+                <span className="px-1 py-1 text-xs font-sans tracking-wide text-neutral-500 dark:text-neutral-400 hover:text-black dark:hover:text-white transition-colors">
+                  Back
+                </span>
+              </button>
+            )}
 
-  <span className="px-1 py-1 text-xs font-sans tracking-wide text-neutral-500 dark:text-neutral-400 hover:text-black dark:hover:text-white transition-colors">
-    Back
-  </span>
-</button>
+            {/* Toast Notification Banner */}
+            {toastMessage && (
+              <div className="flex items-center gap-1.5 px-2.5 py-1 bg-black text-white dark:bg-white dark:text-black rounded text-xs font-mono max-w-full truncate shadow-md animate-fade-in">
+                <Check className="w-3 h-3 shrink-0" />
+                <span className="truncate">{toastMessage}</span>
+              </div>
             )}
           </div>
 
           <div className="flex items-center space-x-1.5 shrink-0">
-            {/* Editor Mode Readout Toggle */}
-            <button
-  type="button"
-  onClick={() =>
-    setMode(mode === 'wysiwyg' ? 'markdown' : 'wysiwyg')
-  }
-  title={`Switch to ${
-    mode === 'wysiwyg' ? 'Markdown' : 'Rich Text'
-  } mode`}
-  className="px-1 py-1 text-xs font-sans tracking-wide underline underline-offset-2 text-neutral-500 dark:text-neutral-400 hover:text-black dark:hover:text-white transition-colors"
->
-  {mode === 'wysiwyg' ? 'Rich Text' : 'Markdown'}
-</button>
-
-            {/* Pin Note */}
-<button
-  type="button"
-  onClick={onTogglePin}
-  title={note.pinned ? 'Unpin note' : 'Pin note'}
-  className={`p-1.5 transition-colors ${
-    note.pinned
-      ? 'text-neutral-900 dark:text-neutral-100'
-      : 'text-neutral-400 dark:text-neutral-600 hover:text-neutral-900 dark:hover:text-neutral-100'
-  }`}
->
-  <Pin
-    className={`w-4 h-4 ${
-      note.pinned ? 'fill-current' : ''
-    }`}
-  />
-</button>
-
             {/* More Actions */}
             <button
               type="button"
@@ -1546,232 +1927,196 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
 
 
 
-      {/* Formatting Toolbar */}
+      {/* Formatting Toolbar - Sticky at bottom on mobile, sticky under header on desktop */}
       <div
         onMouseDown={(e) => e.preventDefault()}
-        className="shrink-0 border-b border-neutral-200 dark:border-neutral-800 px-3 sm:px-5 py-1.5 bg-transparent select-none"
+        className="shrink-0 border-t md:border-t-0 md:border-b border-neutral-200 dark:border-neutral-800 px-3 sm:px-5 py-1.5 bg-neutral-50/95 dark:bg-neutral-950/95 md:bg-transparent backdrop-blur select-none order-2 md:order-1 sticky bottom-0 md:static z-20"
+        style={{ paddingBottom: 'max(0.375rem, env(safe-area-inset-bottom))' }}
       >
-        <div className="flex items-center gap-0.5 overflow-x-auto scrollbar-none">
-          {/* History */}
-          <button
-            type="button"
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={handleUndo}
-            title={`Undo (${modSymbol}Z)`}
-            className="p-1.5 rounded-md transition-colors text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-100 hover:bg-neutral-100 dark:hover:bg-neutral-800/60 shrink-0"
-          >
-            <Undo className="w-4 h-4" />
-          </button>
+        <div className="flex items-center gap-0.5 overflow-x-auto scrollbar-none min-h-[32px]">
+          {hasTextSelection ? (
+            /* Selection Toolbar: B, I, U, link, H1, H2, code block, quote */
+            <>
+              <button
+                type="button"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => handleFormat('bold')}
+                title={`Bold (${modSymbol}B)`}
+                className={`p-1.5 rounded-md transition-colors shrink-0 ${
+                  activeFormats.bold
+                    ? 'bg-neutral-200 dark:bg-neutral-800 text-blue-600 dark:text-blue-400 font-bold'
+                    : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-100 hover:bg-neutral-100 dark:hover:bg-neutral-800/60'
+                }`}
+              >
+                <Bold className="w-4 h-4" />
+              </button>
 
-          <button
-            type="button"
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={handleRedo}
-            title={`Redo (${modSymbol}Y)`}
-            className="p-1.5 rounded-md transition-colors text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-100 hover:bg-neutral-100 dark:hover:bg-neutral-800/60 shrink-0"
-          >
-            <Redo className="w-4 h-4" />
-          </button>
+              <button
+                type="button"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => handleFormat('italic')}
+                title={`Italic (${modSymbol}I)`}
+                className={`p-1.5 rounded-md transition-colors shrink-0 ${
+                  activeFormats.italic
+                    ? 'bg-neutral-200 dark:bg-neutral-800 text-blue-600 dark:text-blue-400 font-bold'
+                    : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-100 hover:bg-neutral-100 dark:hover:bg-neutral-800/60'
+                }`}
+              >
+                <Italic className="w-4 h-4" />
+              </button>
 
-          <div className="w-px h-4 bg-neutral-200 dark:bg-neutral-800 mx-1 shrink-0" />
+              <button
+                type="button"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => handleFormat('underline')}
+                title="Underline"
+                className={`p-1.5 rounded-md transition-colors shrink-0 ${
+                  activeFormats.underline
+                    ? 'bg-neutral-200 dark:bg-neutral-800 text-blue-600 dark:text-blue-400 font-bold'
+                    : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-100 hover:bg-neutral-100 dark:hover:bg-neutral-800/60'
+                }`}
+              >
+                <Underline className="w-4 h-4" />
+              </button>
 
-          {/* Text Style: Bold, Italic, Underline, Link */}
-          <button
-            type="button"
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => handleFormat('bold')}
-            title={`Bold (${modSymbol}B)`}
-            className={`p-1.5 rounded-md transition-colors shrink-0 ${
-              activeFormats.bold
-                ? 'bg-neutral-200 dark:bg-neutral-800 text-blue-600 dark:text-blue-400 font-bold'
-                : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-100 hover:bg-neutral-100 dark:hover:bg-neutral-800/60'
-            }`}
-          >
-            <Bold className="w-4 h-4" />
-          </button>
+              <button
+                type="button"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => handleFormat('link')}
+                title="Insert Link"
+                className={`p-1.5 rounded-md transition-colors shrink-0 ${
+                  activeFormats.link
+                    ? 'bg-neutral-200 dark:bg-neutral-800 text-blue-600 dark:text-blue-400 font-bold'
+                    : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-100 hover:bg-neutral-100 dark:hover:bg-neutral-800/60'
+                }`}
+              >
+                <Link className="w-4 h-4" />
+              </button>
 
-          <button
-            type="button"
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => handleFormat('italic')}
-            title={`Italic (${modSymbol}I)`}
-            className={`p-1.5 rounded-md transition-colors shrink-0 ${
-              activeFormats.italic
-                ? 'bg-neutral-200 dark:bg-neutral-800 text-blue-600 dark:text-blue-400 font-bold'
-                : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-100 hover:bg-neutral-100 dark:hover:bg-neutral-800/60'
-            }`}
-          >
-            <Italic className="w-4 h-4" />
-          </button>
+              <div className="w-px h-4 bg-neutral-200 dark:bg-neutral-800 mx-1 shrink-0" />
 
-          <button
-            type="button"
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => {
-              if (mode === 'wysiwyg') {
-                document.execCommand('underline', false);
-                handleWysiwygInput();
-                checkActiveFormats();
-              } else {
-                handleFormat('bold');
-              }
-            }}
-            title="Underline"
-            className={`p-1.5 rounded-md transition-colors shrink-0 ${
-              activeFormats.underline
-                ? 'bg-neutral-200 dark:bg-neutral-800 text-blue-600 dark:text-blue-400 font-bold'
-                : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-100 hover:bg-neutral-100 dark:hover:bg-neutral-800/60'
-            }`}
-          >
-            <Underline className="w-4 h-4" />
-          </button>
+              <button
+                type="button"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => handleFormat('heading')}
+                title="Heading 1"
+                className={`p-1.5 rounded-md transition-colors shrink-0 ${
+                  activeFormats.heading
+                    ? 'bg-neutral-200 dark:bg-neutral-800 text-blue-600 dark:text-blue-400 font-bold'
+                    : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-100 hover:bg-neutral-100 dark:hover:bg-neutral-800/60'
+                }`}
+              >
+                <Heading1 className="w-4 h-4" />
+              </button>
 
-          <button
-            type="button"
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => handleFormat('link')}
-            title="Insert Link"
-            className={`p-1.5 rounded-md transition-colors shrink-0 ${
-              activeFormats.link
-                ? 'bg-neutral-200 dark:bg-neutral-800 text-blue-600 dark:text-blue-400 font-bold'
-                : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-100 hover:bg-neutral-100 dark:hover:bg-neutral-800/60'
-            }`}
-          >
-            <Link className="w-4 h-4" />
-          </button>
+              <button
+                type="button"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => handleFormat('h2')}
+                title="Heading 2"
+                className={`p-1.5 rounded-md transition-colors shrink-0 ${
+                  activeFormats.h2
+                    ? 'bg-neutral-200 dark:bg-neutral-800 text-blue-600 dark:text-blue-400 font-bold'
+                    : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-100 hover:bg-neutral-100 dark:hover:bg-neutral-800/60'
+                }`}
+              >
+                <Heading2 className="w-4 h-4" />
+              </button>
 
-          <div className="w-px h-4 bg-neutral-200 dark:bg-neutral-800 mx-1 shrink-0" />
+              <button
+                type="button"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => handleFormat('code')}
+                title="Code Block"
+                className={`p-1.5 rounded-md transition-colors shrink-0 ${
+                  activeFormats.code
+                    ? 'bg-neutral-200 dark:bg-neutral-800 text-blue-600 dark:text-blue-400 font-bold'
+                    : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-100 hover:bg-neutral-100 dark:hover:bg-neutral-800/60'
+                }`}
+              >
+                <Code className="w-4 h-4" />
+              </button>
 
-          {/* Headings */}
-          <button
-            type="button"
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => handleFormat('heading')}
-            title="Heading 1"
-            className={`p-1.5 rounded-md transition-colors shrink-0 ${
-              activeFormats.heading
-                ? 'bg-neutral-200 dark:bg-neutral-800 text-blue-600 dark:text-blue-400 font-bold'
-                : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-100 hover:bg-neutral-100 dark:hover:bg-neutral-800/60'
-            }`}
-          >
-            <Heading1 className="w-4 h-4" />
-          </button>
+              <button
+                type="button"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => handleFormat('quote')}
+                title="Quote"
+                className={`p-1.5 rounded-md transition-colors shrink-0 ${
+                  activeFormats.quote
+                    ? 'bg-neutral-200 dark:bg-neutral-800 text-blue-600 dark:text-blue-400 font-bold'
+                    : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-100 hover:bg-neutral-100 dark:hover:bg-neutral-800/60'
+                }`}
+              >
+                <Quote className="w-4 h-4" />
+              </button>
+            </>
+          ) : (
+            /* Default Minimalist Toolbar: undo, redo | checkbox, table, line */
+            <>
+              <button
+                type="button"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={handleUndo}
+                title={`Undo (${modSymbol}Z)`}
+                className="p-1.5 rounded-md transition-colors text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-100 hover:bg-neutral-100 dark:hover:bg-neutral-800/60 shrink-0"
+              >
+                <Undo className="w-4 h-4" />
+              </button>
 
-          <button
-            type="button"
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => handleFormat('h2')}
-            title="Heading 2"
-            className={`p-1.5 rounded-md transition-colors shrink-0 ${
-              activeFormats.h2
-                ? 'bg-neutral-200 dark:bg-neutral-800 text-blue-600 dark:text-blue-400 font-bold'
-                : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-100 hover:bg-neutral-100 dark:hover:bg-neutral-800/60'
-            }`}
-          >
-            <Heading2 className="w-4 h-4" />
-          </button>
+              <button
+                type="button"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={handleRedo}
+                title={`Redo (${modSymbol}Y)`}
+                className="p-1.5 rounded-md transition-colors text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-100 hover:bg-neutral-100 dark:hover:bg-neutral-800/60 shrink-0"
+              >
+                <Redo className="w-4 h-4" />
+              </button>
 
-          <div className="w-px h-4 bg-neutral-200 dark:bg-neutral-800 mx-1 shrink-0" />
+              <div className="w-px h-4 bg-neutral-200 dark:bg-neutral-800 mx-1 shrink-0" />
 
-          {/* Lists */}
-          <button
-            type="button"
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => handleFormat('bullet')}
-            title="Bullet List"
-            className={`p-1.5 rounded-md transition-colors shrink-0 ${
-              activeFormats.bullet
-                ? 'bg-neutral-200 dark:bg-neutral-800 text-blue-600 dark:text-blue-400 font-bold'
-                : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-100 hover:bg-neutral-100 dark:hover:bg-neutral-800/60'
-            }`}
-          >
-            <List className="w-4 h-4" />
-          </button>
+              <button
+                type="button"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => handleFormat('task')}
+                title="Checkbox / Task List"
+                className={`p-1.5 rounded-md transition-colors shrink-0 ${
+                  activeFormats.task
+                    ? 'bg-neutral-200 dark:bg-neutral-800 text-blue-600 dark:text-blue-400 font-bold'
+                    : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-100 hover:bg-neutral-100 dark:hover:bg-neutral-800/60'
+                }`}
+              >
+                <CheckSquare className="w-4 h-4" />
+              </button>
 
-          <button
-            type="button"
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => handleFormat('number')}
-            title="Numbered List"
-            className={`p-1.5 rounded-md transition-colors shrink-0 ${
-              activeFormats.number
-                ? 'bg-neutral-200 dark:bg-neutral-800 text-blue-600 dark:text-blue-400 font-bold'
-                : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-100 hover:bg-neutral-100 dark:hover:bg-neutral-800/60'
-            }`}
-          >
-            <ListOrdered className="w-4 h-4" />
-          </button>
+              <button
+                type="button"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => handleFormat('table')}
+                title="Insert Table"
+                className="p-1.5 rounded-md transition-colors text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-100 hover:bg-neutral-100 dark:hover:bg-neutral-800/60 shrink-0"
+              >
+                <Table className="w-4 h-4" />
+              </button>
 
-          <button
-            type="button"
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => handleFormat('task')}
-            title="Task List"
-            className={`p-1.5 rounded-md transition-colors shrink-0 ${
-              activeFormats.task
-                ? 'bg-neutral-200 dark:bg-neutral-800 text-blue-600 dark:text-blue-400 font-bold'
-                : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-100 hover:bg-neutral-100 dark:hover:bg-neutral-800/60'
-            }`}
-          >
-            <CheckSquare className="w-4 h-4" />
-          </button>
-
-          <div className="w-px h-4 bg-neutral-200 dark:bg-neutral-800 mx-1 shrink-0" />
-
-          {/* Blocks */}
-          <button
-            type="button"
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => handleFormat('code')}
-            title="Code Block"
-            className={`p-1.5 rounded-md transition-colors shrink-0 ${
-              activeFormats.code
-                ? 'bg-neutral-200 dark:bg-neutral-800 text-blue-600 dark:text-blue-400 font-bold'
-                : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-100 hover:bg-neutral-100 dark:hover:bg-neutral-800/60'
-            }`}
-          >
-            <Code className="w-4 h-4" />
-          </button>
-
-          <button
-            type="button"
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => handleFormat('quote')}
-            title="Quote"
-            className={`p-1.5 rounded-md transition-colors shrink-0 ${
-              activeFormats.quote
-                ? 'bg-neutral-200 dark:bg-neutral-800 text-blue-600 dark:text-blue-400 font-bold'
-                : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-100 hover:bg-neutral-100 dark:hover:bg-neutral-800/60'
-            }`}
-          >
-            <Quote className="w-4 h-4" />
-          </button>
-
-          <button
-            type="button"
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => handleFormat('table')}
-            title="Insert Table"
-            className="p-1.5 rounded-md transition-colors text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-100 hover:bg-neutral-100 dark:hover:bg-neutral-800/60 shrink-0"
-          >
-            <Table className="w-4 h-4" />
-          </button>
-
-          <button
-            type="button"
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => handleFormat('hr')}
-            title="Horizontal Line"
-            className="p-1.5 rounded-md transition-colors text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-100 hover:bg-neutral-100 dark:hover:bg-neutral-800/60 shrink-0"
-          >
-            <Minus className="w-4 h-4" />
-          </button>
+              <button
+                type="button"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => handleFormat('hr')}
+                title="Horizontal Line"
+                className="p-1.5 rounded-md transition-colors text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-100 hover:bg-neutral-100 dark:hover:bg-neutral-800/60 shrink-0"
+              >
+                <Minus className="w-4 h-4" />
+              </button>
+            </>
+          )}
         </div>
       </div>
 
 
       {/* Content Area: Title + WYSIWYG or Raw Markdown */}
-      <div className="flex-1 p-4 sm:p-6 overflow-y-auto relative min-w-0 w-full flex flex-col">
+      <div className="flex-1 p-4 sm:p-6 overflow-y-auto relative min-w-0 w-full flex flex-col order-1 md:order-2">
         {/* Title inside the Editor Box */}
         <div className="mb-4 pb-2 border-b border-neutral-100 dark:border-neutral-900 shrink-0">
           <input
@@ -1816,6 +2161,10 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
             onInput={handleWysiwygInput}
             onClick={handleWysiwygClick}
             onKeyDown={handleWysiwygKeyDown}
+            onKeyUp={updateSelectionState}
+            onMouseUp={updateSelectionState}
+            onTouchEnd={updateSelectionState}
+            onSelect={updateSelectionState}
             onPaste={handleWysiwygPaste}
             className="editor-wysiwyg w-full min-h-[350px] outline-none text-neutral-900 dark:text-neutral-100"
           />
@@ -1828,6 +2177,10 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
               onChangeContent(e.target.value);
             }}
             onKeyDown={handleKeyDownMarkdown}
+            onKeyUp={updateSelectionState}
+            onMouseUp={updateSelectionState}
+            onTouchEnd={updateSelectionState}
+            onSelect={updateSelectionState}
             placeholder="Type raw markdown here..."
             className="w-full min-h-[350px] resize-none bg-transparent text-neutral-900 dark:text-neutral-100 placeholder-neutral-400 dark:placeholder-neutral-600 font-mono text-sm leading-relaxed focus:outline-none overflow-hidden"
           />
@@ -2117,9 +2470,9 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
     {/* NOTE ACTIONS */}
     {/* ============================================================ */}
 
-    <section className="border-t border-neutral-200 dark:border-neutral-800 py-6">
+    <section className="border-t border-neutral-200 dark:border-neutral-800 py-5">
 
-      <div className="mb-4 flex items-center justify-between">
+      <div className="mb-3 flex items-center justify-between">
         <span className="text-xs font-medium tracking-wide text-black dark:text-white">
           {note.type === 'post' ? 'Blog post' : 'Note'}
         </span>
@@ -2135,7 +2488,21 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
         )}
       </div>
 
-      <div className="flex flex-col items-start gap-3">
+      <div className="flex flex-col">
+        {onTogglePin && (
+          <button
+            type="button"
+            onClick={onTogglePin}
+            className="group flex items-center justify-between py-2.5 text-left"
+          >
+            <span className="text-sm text-black dark:text-white group-hover:underline underline-offset-4">
+              {note.pinned ? 'Unpin' : 'Pin'}
+            </span>
+            <span className="text-xs text-neutral-400 dark:text-neutral-600">
+              {note.pinned ? 'Unpin from top' : 'Pin to top'}
+            </span>
+          </button>
+        )}
 
         {note.deletedAt ? (
           onRestoreNote && (
@@ -2145,9 +2512,14 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
                 onRestoreNote();
                 setIsSlideoutOpen(false);
               }}
-              className="text-sm text-black dark:text-white hover:underline underline-offset-4 transition-all"
+              className="group flex items-center justify-between py-2.5 text-left"
             >
-              Restore {note.type === 'post' ? 'post' : 'note'}
+              <span className="text-sm text-black dark:text-white group-hover:underline underline-offset-4">
+                Restore
+              </span>
+              <span className="text-xs text-neutral-400 dark:text-neutral-600">
+                Restore {note.type === 'post' ? 'post' : 'note'}
+              </span>
             </button>
           )
         ) : (
@@ -2158,11 +2530,34 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
                 onDeleteNote();
                 setIsSlideoutOpen(false);
               }}
-              className="text-sm text-black dark:text-white hover:underline underline-offset-4 transition-all"
+              className="group flex items-center justify-between py-2.5 text-left"
             >
-              Move to trash
+              <span className="text-sm text-black dark:text-white group-hover:underline underline-offset-4">
+                Delete
+              </span>
+              <span className="text-xs text-neutral-400 dark:text-neutral-600">
+                Move to trash
+              </span>
             </button>
           )
+        )}
+
+        {onSaveToLocalFolder && (
+          <button
+            type="button"
+            onClick={() => {
+              onSaveToLocalFolder();
+              setIsSlideoutOpen(false);
+            }}
+            className="group flex items-center justify-between py-2.5 text-left"
+          >
+            <span className="text-sm text-black dark:text-white group-hover:underline underline-offset-4">
+              Save
+            </span>
+            <span className="text-xs text-neutral-400 dark:text-neutral-600">
+              Save to local device
+            </span>
+          </button>
         )}
 
       </div>
@@ -2173,9 +2568,9 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
     {/* NOTE INFORMATION */}
     {/* ============================================================ */}
 
-    <section className="border-t border-neutral-200 dark:border-neutral-800 py-6">
+    <section className="border-t border-neutral-200 dark:border-neutral-800 py-5">
 
-      <div className="mb-4">
+      <div className="mb-3">
         <span className="text-xs font-medium tracking-wide text-black dark:text-white">
           Information
         </span>
@@ -2257,20 +2652,36 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
       </div>
     </section>
 
-
     {/* ============================================================ */}
     {/* APP SETTINGS */}
     {/* ============================================================ */}
 
-    <section className="border-t border-neutral-200 dark:border-neutral-800 py-6">
+    <section className="border-t border-neutral-200 dark:border-neutral-800 py-5">
 
-      <div className="mb-4">
+      <div className="mb-3">
         <span className="text-xs font-medium tracking-wide text-black dark:text-white">
           Settings
         </span>
       </div>
 
       <div className="flex flex-col">
+
+        {/* Editor */}
+        <button
+          type="button"
+          onClick={() =>
+            setMode(mode === 'wysiwyg' ? 'markdown' : 'wysiwyg')
+          }
+          className="group flex items-center justify-between py-2.5 text-left"
+        >
+          <span className="text-sm text-black dark:text-white group-hover:underline underline-offset-4">
+            Editor
+          </span>
+
+          <span className="text-xs text-neutral-400 dark:text-neutral-600">
+            {mode === 'wysiwyg' ? 'Rich text' : 'Markdown'}
+          </span>
+        </button>
 
         {/* Theme */}
         {onToggleTheme && (
@@ -2313,26 +2724,6 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
           </button>
         )}
 
-        {/* Sync Settings (if in Vercel mode or openable) */}
-        {onOpenSyncModal && (
-          <button
-            type="button"
-            onClick={() => {
-              onOpenSyncModal();
-              setIsSlideoutOpen(false);
-            }}
-            className="group flex items-center justify-between py-2.5 text-left"
-          >
-            <span className="text-sm text-black dark:text-white group-hover:underline underline-offset-4">
-              End-to-End Sync
-            </span>
-
-            <span className="text-xs text-neutral-400 dark:text-neutral-600">
-              E2EE / Devices
-            </span>
-          </button>
-        )}
-
         {/* Backup */}
         {onOpenBackupModal && (
           <button
@@ -2368,7 +2759,7 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
             </span>
 
             <span className="text-xs text-neutral-400 dark:text-neutral-600">
-              Markdown / Backup
+              Files / Folder / Backup
             </span>
           </button>
         )}
