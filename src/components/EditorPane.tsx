@@ -1,7 +1,8 @@
 import React, { useRef, useState, useEffect, useCallback } from 'react';
-import { MoreVertical, ArrowLeft, Check } from 'lucide-react';
-import { EditorMode } from '../types';
+import { MoreVertical, ArrowLeft, Check, Image as ImageIcon, Sparkles } from 'lucide-react';
+import { EditorMode, NoteImage, ImageFolderStrategy } from '../types';
 import { renderMarkdownToHtml } from '../lib/markdown';
+import { cleanImageFilename, computeRelativeImagePath, readFileAsDataUrl } from '../lib/imageUtils';
 import { ActiveFormats, HistoryItem, EditorPaneProps, FormatActionType } from './editor/types';
 import { getCaretCharacterOffsetWithin, setCaretCharacterOffsetWithin } from './editor/editorUtils';
 import { useWysiwygHandlers } from './editor/useWysiwygHandlers';
@@ -10,6 +11,7 @@ import { useKeyboardOffset } from './editor/useKeyboardOffset';
 import { EditorToolbar } from './editor/EditorToolbar';
 import { OptionsSlideout } from './editor/OptionsSlideout';
 import { LinkModal } from './editor/LinkModal';
+import { ImageModal } from './editor/ImageModal';
 
 export const EditorPane: React.FC<EditorPaneProps> = ({
   note,
@@ -29,8 +31,20 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
   toastMessage,
   onChangeDescription,
   onChangeAuthor,
+  allAuthors,
+  onChangeProject,
+  allProjects,
   onToggleFeatured,
+  onChangeSlug,
+  onChangeStatus,
+  onChangeYear,
+  onChangeUrl,
+  onChangeGithub,
+  onChangeOrder,
   onChangeType,
+  onAddImage,
+  onRemoveImage,
+  onChangeImageFolderStrategy,
   theme,
   onToggleTheme,
   storageMode,
@@ -64,6 +78,10 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
   const [savedRange, setSavedRange] = useState<Range | null>(null);
   const [savedTextareaSel, setSavedTextareaSel] = useState<{ start: number; end: number } | null>(null);
 
+  // Image Modal State
+  const [isImageModalOpen, setIsImageModalOpen] = useState(false);
+  const [isDraggingOver, setIsDraggingOver] = useState(false);
+
   // Active formatting state for toolbar highlights
   const [activeFormats, setActiveFormats] = useState<ActiveFormats>({
     bold: false,
@@ -77,6 +95,7 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
     quote: false,
     code: false,
     link: false,
+    image: false,
   });
 
   // Track selection state for dynamic toolbar (selection mode vs standard mode)
@@ -89,7 +108,7 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
 
   // History stack for exact granular Undo/Redo
   const historyRef = useRef<HistoryItem[]>([
-    { content: note.content, selStart: 0, selEnd: 0, html: renderMarkdownToHtml(note.content) },
+    { content: note.content, selStart: 0, selEnd: 0, html: renderMarkdownToHtml(note.content, note.images) },
   ]);
   const historyIdxRef = useRef<number>(0);
   const isUndoRedoActionRef = useRef<boolean>(false);
@@ -103,12 +122,12 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
           content: note.content,
           selStart: 0,
           selEnd: 0,
-          html: renderMarkdownToHtml(note.content),
+          html: renderMarkdownToHtml(note.content, note.images),
         },
       ];
       historyIdxRef.current = 0;
     }
-  }, [note.id, note.content]);
+  }, [note.id, note.content, note.images]);
 
   const pushHistory = useCallback(
     (newContent: string, selStart?: number, selEnd?: number, customHtml?: string) => {
@@ -158,12 +177,12 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
 
       if (isUndoRedoActionRef.current) return;
 
-      const html = renderMarkdownToHtml(note.content);
+      const html = renderMarkdownToHtml(note.content, note.images);
       if (isDifferentNote || document.activeElement !== wysiwygRef.current) {
         wysiwygRef.current.innerHTML = html || '<p><br></p>';
       }
     }
-  }, [note.id, note.content, mode]);
+  }, [note.id, note.content, note.images, mode]);
 
   // Auto-expand textarea height in Markdown mode
   useEffect(() => {
@@ -210,7 +229,7 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
       onChangeContent(target.content);
 
       if (mode === 'wysiwyg' && wysiwygRef.current) {
-        const htmlToSet = target.html || renderMarkdownToHtml(target.content) || '<p><br></p>';
+        const htmlToSet = target.html || renderMarkdownToHtml(target.content, note.images) || '<p><br></p>';
         wysiwygRef.current.innerHTML = htmlToSet;
         wysiwygRef.current.focus();
         setCaretCharacterOffsetWithin(wysiwygRef.current, target.selStart);
@@ -224,7 +243,7 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
         isUndoRedoActionRef.current = false;
       }, 0);
     }
-  }, [onChangeContent, mode]);
+  }, [onChangeContent, mode, note.images]);
 
   const handleRedo = useCallback(() => {
     if (historyIdxRef.current < historyRef.current.length - 1) {
@@ -234,7 +253,7 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
       onChangeContent(target.content);
 
       if (mode === 'wysiwyg' && wysiwygRef.current) {
-        const htmlToSet = target.html || renderMarkdownToHtml(target.content) || '<p><br></p>';
+        const htmlToSet = target.html || renderMarkdownToHtml(target.content, note.images) || '<p><br></p>';
         wysiwygRef.current.innerHTML = htmlToSet;
         wysiwygRef.current.focus();
         setCaretCharacterOffsetWithin(wysiwygRef.current, target.selStart);
@@ -248,7 +267,7 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
         isUndoRedoActionRef.current = false;
       }, 0);
     }
-  }, [onChangeContent, mode]);
+  }, [onChangeContent, mode, note.images]);
 
   // Open Link modal helper
   const handleOpenLinkModal = useCallback(
@@ -270,6 +289,11 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
     []
   );
 
+  // Open Image modal helper
+  const handleOpenImageModal = useCallback(() => {
+    setIsImageModalOpen(true);
+  }, []);
+
   // Modular Hooks
   const {
     checkActiveFormats,
@@ -287,6 +311,7 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
     activeFormats,
     setActiveFormats,
     onOpenLinkModal: handleOpenLinkModal,
+    onOpenImageModal: handleOpenImageModal,
   });
 
   const { handleMarkdownFormatAction, handleMarkdownKeyDown } = useMarkdownHandlers({
@@ -296,12 +321,17 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
     handleUndo,
     handleRedo,
     onOpenLinkModal: handleOpenLinkModal,
+    onOpenImageModal: handleOpenImageModal,
   });
 
   const { isKeyboardOpen, bottomInset } = useKeyboardOffset();
 
   // Unified formatting trigger
   const handleFormat = (type: FormatActionType) => {
+    if (type === 'image') {
+      setIsImageModalOpen(true);
+      return;
+    }
     if (mode === 'wysiwyg') {
       handleWysiwygFormatAction(type);
     } else {
@@ -350,6 +380,92 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
     }
 
     setIsLinkModalOpen(false);
+  };
+
+  // Insert Image into Post (WYSIWYG or Markdown)
+  const handleInsertImage = (image: NoteImage, snippet: string) => {
+    if (onAddImage) {
+      onAddImage(image);
+    }
+
+    if (mode === 'wysiwyg' && wysiwygRef.current) {
+      wysiwygRef.current.focus();
+      const relativeAttr = `data-relative-path="${image.relativePath || image.name}"`;
+      const imgHtml = `<p><img src="${image.dataUrl}" ${relativeAttr} alt="${image.alt || image.name}" class="max-w-full h-auto rounded my-2 border border-neutral-200 dark:border-neutral-800 shadow-sm inline-block"></p><p><br></p>`;
+
+      const sel = window.getSelection();
+      if (sel && sel.rangeCount > 0 && wysiwygRef.current.contains(sel.anchorNode)) {
+        document.execCommand('insertHTML', false, imgHtml);
+      } else {
+        wysiwygRef.current.insertAdjacentHTML('beforeend', imgHtml);
+      }
+      handleWysiwygInput();
+      checkActiveFormats();
+    } else if (mode === 'markdown' && textareaRef.current) {
+      const textarea = textareaRef.current;
+      const start = textarea.selectionStart ?? note.content.length;
+      const end = textarea.selectionEnd ?? note.content.length;
+      const before = note.content.substring(0, start);
+      const after = note.content.substring(end);
+      const separatorBefore = before.length > 0 && !before.endsWith('\n\n') ? (before.endsWith('\n') ? '\n' : '\n\n') : '';
+      const separatorAfter = after.length > 0 && !after.startsWith('\n\n') ? (after.startsWith('\n') ? '\n' : '\n\n') : '';
+      const insertion = `${separatorBefore}${snippet}${separatorAfter}`;
+      const newContent = before + insertion + after;
+      onChangeContent(newContent);
+      pushHistory(newContent, start + insertion.length, start + insertion.length);
+      setTimeout(() => {
+        if (textareaRef.current) {
+          textareaRef.current.focus();
+          textareaRef.current.setSelectionRange(start + insertion.length, start + insertion.length);
+        }
+      }, 10);
+    }
+  };
+
+  // Drag and drop image files directly into the editor pane
+  const handleEditorDragOver = (e: React.DragEvent) => {
+    if (e.dataTransfer.types.includes('Files')) {
+      e.preventDefault();
+      setIsDraggingOver(true);
+    }
+  };
+
+  const handleEditorDragLeave = (e: React.DragEvent) => {
+    if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+      setIsDraggingOver(false);
+    }
+  };
+
+  const handleEditorDrop = async (e: React.DragEvent) => {
+    if (!e.dataTransfer.files || e.dataTransfer.files.length === 0) return;
+    const file = e.dataTransfer.files[0];
+    if (!file.type.startsWith('image/')) return;
+
+    e.preventDefault();
+    setIsDraggingOver(false);
+
+    try {
+      const dataUrl = await readFileAsDataUrl(file);
+      const cleaned = cleanImageFilename(file.name);
+      const relativePath = computeRelativeImagePath(cleaned, note);
+      const autoAlt = file.name.replace(/\.[^/.]+$/, '').replace(/[-_]+/g, ' ');
+
+      const newImage: NoteImage = {
+        id: `img-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
+        name: cleaned,
+        dataUrl,
+        relativePath,
+        alt: autoAlt,
+        size: file.size,
+        mimeType: file.type,
+        createdAt: Date.now(),
+      };
+
+      const snippet = `![${newImage.alt}](${newImage.relativePath})`;
+      handleInsertImage(newImage, snippet);
+    } catch (err) {
+      console.error('Failed to handle dropped image:', err);
+    }
   };
 
   // Sync selection changes to update active button styles
@@ -414,8 +530,24 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
     }
   }, [note.id, note.title, note.content, focusContent]);
 
+  const imagesCount = note.images?.length || 0;
+
   return (
-    <div className="flex-1 flex flex-col h-full w-full min-w-0 overflow-hidden bg-white dark:bg-black transition-colors duration-200 relative">
+    <div
+      onDragOver={handleEditorDragOver}
+      onDragLeave={handleEditorDragLeave}
+      onDrop={handleEditorDrop}
+      className="flex-1 flex flex-col h-full w-full min-w-0 overflow-hidden bg-white dark:bg-black transition-colors duration-200 relative"
+    >
+      {/* Visual Drag & Drop Overlay */}
+      {isDraggingOver && (
+        <div className="absolute inset-0 z-50 bg-neutral-900/80 backdrop-blur-xs flex flex-col items-center justify-center pointer-events-none text-white border-2 border-dashed border-white m-4 rounded-2xl animate-fade-in">
+          <ImageIcon className="w-12 h-12 mb-2 animate-bounce" />
+          <p className="text-base font-semibold">Drop image to add to {note.type === 'project' ? 'Project' : note.type === 'post' ? 'Blog Post' : 'Note'}</p>
+          <p className="text-xs text-neutral-300 mt-1">Image will be saved in your blog repository folder</p>
+        </div>
+      )}
+
       {/* Top Header Bar */}
       <div className="p-3 sm:p-4 border-b border-neutral-200 dark:border-neutral-800 shrink-0 sticky top-0 z-20 w-full min-w-0 bg-neutral-50/95 dark:bg-neutral-950/95 backdrop-blur">
         <div className="flex items-center justify-between gap-2 min-w-0 w-full">
@@ -443,6 +575,17 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
           </div>
 
           <div className="flex items-center space-x-1.5 shrink-0">
+            {/* Quick Media / Image Button */}
+            <button
+              type="button"
+              onClick={() => setIsImageModalOpen(true)}
+              title={imagesCount > 0 ? `${imagesCount} image${imagesCount > 1 ? 's' : ''} attached (Click to manage)` : 'Add Image'}
+              className="flex items-center space-x-1 px-2.5 py-1 text-xs font-medium rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors"
+            >
+              <ImageIcon className="w-3.5 h-3.5 text-blue-500" />
+              <span>{imagesCount > 0 ? `${imagesCount} img` : 'Image'}</span>
+            </button>
+
             <button
               type="button"
               onClick={() => setIsSlideoutOpen(true)}
@@ -479,7 +622,7 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
         <div className="mb-4 pb-2 border-b border-neutral-100 dark:border-neutral-900 shrink-0">
           <input
             type="text"
-            placeholder={note.type === 'post' ? 'Post title' : 'Title'}
+            placeholder={note.type === 'post' ? 'Post title' : note.type === 'project' ? 'Project title' : 'Title'}
             value={note.title}
             onChange={(e) => onChangeTitle(e.target.value)}
             onKeyDown={(e) => {
@@ -556,6 +699,15 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
         onSubmit={handleApplyLink}
       />
 
+      {/* Image Insertion & Management Modal */}
+      <ImageModal
+        isOpen={isImageModalOpen}
+        onClose={() => setIsImageModalOpen(false)}
+        note={note}
+        onInsertImage={handleInsertImage}
+        onDeleteExistingImage={onRemoveImage}
+      />
+
       {/* Slideout Drawer Window */}
       <OptionsSlideout
         isOpen={isSlideoutOpen}
@@ -565,7 +717,16 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
         onAddTag={onAddTag}
         onRemoveTag={onRemoveTag}
         onChangeAuthor={onChangeAuthor}
+        allAuthors={allAuthors}
+        onChangeProject={onChangeProject}
+        allProjects={allProjects}
         onToggleFeatured={onToggleFeatured}
+        onChangeSlug={onChangeSlug}
+        onChangeStatus={onChangeStatus}
+        onChangeYear={onChangeYear}
+        onChangeUrl={onChangeUrl}
+        onChangeGithub={onChangeGithub}
+        onChangeOrder={onChangeOrder}
         onChangeType={onChangeType}
         onTogglePin={onTogglePin}
         onDeleteNote={onDeleteNote}

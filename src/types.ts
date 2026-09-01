@@ -1,3 +1,18 @@
+export type NoteType = 'note' | 'post' | 'project';
+export type ProjectStatus = 'Active' | 'Development' | 'Ended';
+export type ImageFolderStrategy = 'same-folder' | 'post-folder' | 'images-folder';
+
+export interface NoteImage {
+  id: string;
+  name: string; // e.g. "cover.png"
+  dataUrl: string; // Base64 data URL e.g. "data:image/png;base64,..." or remote URL
+  relativePath: string; // e.g. "./cover.png" or "./post-slug/cover.png" or "./images/cover.png"
+  alt?: string;
+  size?: number; // bytes
+  mimeType?: string;
+  createdAt?: number;
+}
+
 export interface Note {
   id: string;
   title: string;
@@ -8,11 +23,22 @@ export interface Note {
   pinned?: boolean;
   fileName?: string; // name of file on disk if using File System Access API
   deletedAt?: number; // timestamp when soft-deleted to trash
-  type?: 'note' | 'post';
+  type?: NoteType;
   date?: string; // e.g. "August 25, 2026"
   description?: string; // Subtitle / summary
   author?: string;
+  project?: string;
   featured?: boolean;
+  // Project specific fields
+  slug?: string;
+  status?: ProjectStatus | string;
+  year?: number | string;
+  url?: string;
+  github?: string;
+  order?: number;
+  // Image assets
+  images?: NoteImage[];
+  imageFolderStrategy?: ImageFolderStrategy;
 }
 
 export type StorageMode = 'filesystem' | 'indexeddb' | 'vercel';

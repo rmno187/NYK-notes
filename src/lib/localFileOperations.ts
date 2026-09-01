@@ -1,46 +1,15 @@
-import { Note } from '../types';
+import JSZip from 'jszip';
+import { Note, NoteImage } from '../types';
 import { serializeNoteToMarkdown, parseMarkdownNote } from './markdown';
+import { dataUrlToBlob } from './imageUtils';
+import { getNoteBaseName } from './noteUtils';
 
 /**
  * Generates a clean markdown filename from date stamp and title.
  * Format: YYYY-MM-DD-title.md or YYYY-MM-DD.md if no title exists.
  */
 export function generateNoteFilename(note: Partial<Note>, fallbackTimestamp?: number): string {
-  let noteDate: Date;
-
-  if (note.date) {
-    const parsedDate = new Date(note.date);
-    if (!isNaN(parsedDate.getTime())) {
-      noteDate = parsedDate;
-    } else if (note.createdAt) {
-      noteDate = new Date(note.createdAt);
-    } else {
-      noteDate = new Date();
-    }
-  } else if (note.createdAt) {
-    noteDate = new Date(note.createdAt);
-  } else if (fallbackTimestamp) {
-    noteDate = new Date(fallbackTimestamp);
-  } else {
-    noteDate = new Date();
-  }
-
-  const year = noteDate.getFullYear();
-  const month = String(noteDate.getMonth() + 1).padStart(2, '0');
-  const day = String(noteDate.getDate()).padStart(2, '0');
-  const dateStamp = `${year}-${month}-${day}`;
-
-  const cleanTitle = (note.title || '')
-    .toLowerCase()
-    .trim()
-    .replace(/[^\w\s-]/g, '')     // Remove characters that aren't letters, numbers, spaces, hyphens, underscores
-    .replace(/[\s_]+/g, '-')       // Replace whitespace and underscores with hyphens
-    .replace(/^-+|-+$/g, '');      // Trim hyphens from start and end
-
-  if (cleanTitle) {
-    return `${dateStamp}-${cleanTitle}.md`;
-  }
-  return `${dateStamp}.md`;
+  return `${getNoteBaseName(note, fallbackTimestamp)}.md`;
 }
 
 /**
@@ -68,13 +37,55 @@ export interface SaveResult {
   fileName: string;
   folderName?: string;
   directoryHandle?: FileSystemDirectoryHandle;
-  method: 'folder' | 'picker' | 'download';
+  method: 'folder' | 'picker' | 'download' | 'zip';
+  savedImagesCount?: number;
+  savedImagePaths?: string[];
 }
 
 /**
- * Saves a note as a .md file directly into a chosen or existing local storage folder.
- * If dirHandle is provided, saves directly into it.
- * Otherwise, prompts the user to select the folder they want the file to live in.
+ * Writes attached images into the directory handle, creating subfolders as needed based on relative paths.
+ */
+export async function saveImagesToDirectoryHandle(
+  dirHandle: FileSystemDirectoryHandle,
+  images: NoteImage[]
+): Promise<string[]> {
+  const savedPaths: string[] = [];
+
+  for (const image of images) {
+    if (!image.dataUrl) continue;
+
+    try {
+      const blob = dataUrlToBlob(image.dataUrl);
+      const cleanPath = (image.relativePath || image.name).replace(/^\.\//, '').replace(/^\//, '');
+      const segments = cleanPath.split('/');
+      const filename = segments.pop() || image.name;
+
+      // Navigate or create intermediate directories
+      let currentDir = dirHandle;
+      for (const dirName of segments) {
+        if (dirName && dirName !== '.') {
+          currentDir = await currentDir.getDirectoryHandle(dirName, { create: true });
+        }
+      }
+
+      // Write image file
+      const fileHandle = await currentDir.getFileHandle(filename, { create: true });
+      const writable = await fileHandle.createWritable();
+      await writable.write(blob);
+      await writable.close();
+
+      savedPaths.push(image.relativePath || `./${cleanPath}`);
+    } catch (imgErr) {
+      console.warn(`Failed to save image ${image.name} to directory:`, imgErr);
+    }
+  }
+
+  return savedPaths;
+}
+
+/**
+ * Saves a note as a .md file directly into a chosen or existing local storage folder,
+ * along with any attached image assets.
  */
 export async function saveNoteToLocalFolder(
   note: Note,
@@ -82,6 +93,7 @@ export async function saveNoteToLocalFolder(
 ): Promise<SaveResult> {
   const fileName = generateNoteFilename(note);
   const markdownContent = serializeNoteToMarkdown(note);
+  const images = note.images || [];
 
   // If we already have a valid directory handle, use it
   if (existingDirHandle) {
@@ -94,16 +106,25 @@ export async function saveNoteToLocalFolder(
         }
       }
 
+      // 1. Write Markdown file
       const fileHandle = await existingDirHandle.getFileHandle(fileName, { create: true });
       const writable = await fileHandle.createWritable();
       await writable.write(markdownContent);
       await writable.close();
+
+      // 2. Write all attached images if any exist
+      let savedImagePaths: string[] = [];
+      if (images.length > 0) {
+        savedImagePaths = await saveImagesToDirectoryHandle(existingDirHandle, images);
+      }
 
       return {
         fileName,
         folderName: existingDirHandle.name,
         directoryHandle: existingDirHandle,
         method: 'folder',
+        savedImagesCount: savedImagePaths.length,
+        savedImagePaths,
       };
     } catch (err: any) {
       if (err.name === 'AbortError') {
@@ -126,24 +147,44 @@ export async function saveNoteToLocalFolder(
         await (dirHandle as any).requestPermission?.(options);
       }
 
+      // 1. Write Markdown file
       const fileHandle = await dirHandle.getFileHandle(fileName, { create: true });
       const writable = await fileHandle.createWritable();
       await writable.write(markdownContent);
       await writable.close();
+
+      // 2. Write all attached images
+      let savedImagePaths: string[] = [];
+      if (images.length > 0) {
+        savedImagePaths = await saveImagesToDirectoryHandle(dirHandle, images);
+      }
 
       return {
         fileName,
         folderName: dirHandle.name,
         directoryHandle: dirHandle,
         method: 'folder',
+        savedImagesCount: savedImagePaths.length,
+        savedImagePaths,
       };
     } catch (err: any) {
       if (err.name === 'AbortError') {
         throw new Error('Folder selection was cancelled.');
       }
-      // If directory picker fails, fallback to save file picker or download
-      console.warn('showDirectoryPicker failed, falling back to showSaveFilePicker:', err);
+      // If directory picker fails, fallback to save file picker or zip download
+      console.warn('showDirectoryPicker failed, falling back:', err);
     }
+  }
+
+  // If note has images, package as a zip with folder structure preserved
+  if (images.length > 0) {
+    await downloadNoteWithImagesZip(note, fileName, markdownContent);
+    return {
+      fileName,
+      method: 'zip',
+      savedImagesCount: images.length,
+      savedImagePaths: images.map((i) => i.relativePath || i.name),
+    };
   }
 
   // If Save File Picker is supported (lets user choose destination folder in native save dialog)
@@ -184,6 +225,43 @@ export async function saveNoteToLocalFolder(
     fileName,
     method: 'download',
   };
+}
+
+/**
+ * Packages a note and all its attached images into a .zip archive and triggers a browser download.
+ */
+export async function downloadNoteWithImagesZip(
+  note: Note,
+  fileNameArg?: string,
+  markdownContentArg?: string
+): Promise<void> {
+  const zip = new JSZip();
+  const fileName = fileNameArg || generateNoteFilename(note);
+  const markdownContent = markdownContentArg || serializeNoteToMarkdown(note);
+
+  // Add the markdown file
+  zip.file(fileName, markdownContent);
+
+  // Add image files
+  const images = note.images || [];
+  for (const img of images) {
+    if (!img.dataUrl) continue;
+    const blob = dataUrlToBlob(img.dataUrl);
+    const cleanPath = (img.relativePath || img.name).replace(/^\.\//, '').replace(/^\//, '');
+    zip.file(cleanPath, blob);
+  }
+
+  const baseZipName = fileName.replace(/\.md$/, '') + '.zip';
+  const zipBlob = await zip.generateAsync({ type: 'blob' });
+
+  const url = URL.createObjectURL(zipBlob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = baseZipName;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 /**
@@ -238,6 +316,7 @@ export async function openLocalMarkdownFile(): Promise<{ note: Note; fileName: s
         date: parsed.date,
         description: parsed.description,
         author: parsed.author,
+        project: parsed.project,
         featured: parsed.featured,
         createdAt: file.lastModified || Date.now(),
         updatedAt: file.lastModified || Date.now(),
@@ -280,6 +359,7 @@ export async function openLocalMarkdownFile(): Promise<{ note: Note; fileName: s
           date: parsed.date,
           description: parsed.description,
           author: parsed.author,
+          project: parsed.project,
           featured: parsed.featured,
           createdAt: file.lastModified || Date.now(),
           updatedAt: file.lastModified || Date.now(),

@@ -1,6 +1,7 @@
 import { Marked } from 'marked';
 import TurndownService from 'turndown';
-import { Note } from '../types';
+import { Note, NoteType, NoteImage } from '../types';
+import { slugify } from './noteUtils';
 
 const marked = new Marked({
   gfm: true,
@@ -13,6 +14,21 @@ const turndown = new TurndownService({
   bulletListMarker: '-',
   emDelimiter: '*',
   strongDelimiter: '**',
+});
+
+// Add rule for images in Turndown to preserve relative paths
+turndown.addRule('images', {
+  filter: 'img',
+  replacement: (_content, node) => {
+    const el = node as HTMLImageElement;
+    const alt = el.getAttribute('alt') || '';
+    const src = el.getAttribute('data-relative-path') || el.getAttribute('src') || '';
+    const title = el.getAttribute('title');
+    if (title) {
+      return `![${alt}](${src} "${title}")`;
+    }
+    return `![${alt}](${src})`;
+  },
 });
 
 // Add rule for underline conversion in Turndown
@@ -114,11 +130,18 @@ export function parseMarkdownNote(rawContent: string, defaultFileName?: string) 
   let hasExplicitTitle = false;
   let tags: string[] = [];
   let pinned = false;
-  let type: 'note' | 'post' | undefined = undefined;
+  let type: NoteType | undefined = undefined;
   let date: string | undefined = undefined;
   let description: string | undefined = undefined;
   let author: string | undefined = undefined;
+  let project: string | undefined = undefined;
   let featured: boolean | undefined = undefined;
+  let slug: string | undefined = undefined;
+  let status: string | undefined = undefined;
+  let year: number | string | undefined = undefined;
+  let url: string | undefined = undefined;
+  let github: string | undefined = undefined;
+  let order: number | undefined = undefined;
   let content = (rawContent || '').replace(/^\uFEFF/, ''); // Strip UTF-8 BOM if present
 
   // 1. Check for YAML Frontmatter delimited by --- or +++
@@ -148,11 +171,29 @@ export function parseMarkdownNote(rawContent: string, defaultFileName?: string) 
           description = value.replace(/^['"]|['"]$/g, '');
         } else if (key === 'author') {
           author = value.replace(/^['"]|['"]$/g, '');
+        } else if (key === 'project') {
+          project = value.replace(/^['"]|['"]$/g, '');
         } else if (key === 'featured') {
           featured = value.toLowerCase() === 'true';
+        } else if (key === 'slug') {
+          slug = value.replace(/^['"]|['"]$/g, '');
+        } else if (key === 'status') {
+          status = value.replace(/^['"]|['"]$/g, '');
+        } else if (key === 'year') {
+          const num = parseInt(value.replace(/^['"]|['"]$/g, ''), 10);
+          year = isNaN(num) ? value.replace(/^['"]|['"]$/g, '') : num;
+        } else if (key === 'url') {
+          url = value.replace(/^['"]|['"]$/g, '');
+        } else if (key === 'github') {
+          github = value.replace(/^['"]|['"]$/g, '');
+        } else if (key === 'order') {
+          const num = parseInt(value.replace(/^['"]|['"]$/g, ''), 10);
+          order = isNaN(num) ? undefined : num;
         } else if (key === 'type') {
           const cleanType = value.replace(/^['"]|['"]$/g, '').trim().toLowerCase();
-          if (cleanType === 'post' || cleanType === 'blog') {
+          if (cleanType === 'project') {
+            type = 'project';
+          } else if (cleanType === 'post' || cleanType === 'blog') {
             type = 'post';
           } else {
             type = 'note';
@@ -179,7 +220,7 @@ export function parseMarkdownNote(rawContent: string, defaultFileName?: string) 
       if (colonIdx !== -1) {
         const key = line.slice(0, colonIdx).trim().toLowerCase();
         const value = line.slice(colonIdx + 1).trim();
-        if (['title', 'tags', 'pinned', 'created', 'updated', 'date', 'id', 'description', 'subtitle', 'author', 'featured', 'type'].includes(key)) {
+        if (['title', 'tags', 'pinned', 'created', 'updated', 'date', 'id', 'description', 'subtitle', 'author', 'project', 'featured', 'slug', 'status', 'year', 'url', 'github', 'order', 'type'].includes(key)) {
           foundHeaders = true;
           headerLineCount = i + 1;
           if (key === 'title') {
@@ -195,11 +236,29 @@ export function parseMarkdownNote(rawContent: string, defaultFileName?: string) 
             description = value.replace(/^['"]|['"]$/g, '');
           } else if (key === 'author') {
             author = value.replace(/^['"]|['"]$/g, '');
+          } else if (key === 'project') {
+            project = value.replace(/^['"]|['"]$/g, '');
           } else if (key === 'featured') {
             featured = value.toLowerCase() === 'true';
+          } else if (key === 'slug') {
+            slug = value.replace(/^['"]|['"]$/g, '');
+          } else if (key === 'status') {
+            status = value.replace(/^['"]|['"]$/g, '');
+          } else if (key === 'year') {
+            const num = parseInt(value.replace(/^['"]|['"]$/g, ''), 10);
+            year = isNaN(num) ? value.replace(/^['"]|['"]$/g, '') : num;
+          } else if (key === 'url') {
+            url = value.replace(/^['"]|['"]$/g, '');
+          } else if (key === 'github') {
+            github = value.replace(/^['"]|['"]$/g, '');
+          } else if (key === 'order') {
+            const num = parseInt(value.replace(/^['"]|['"]$/g, ''), 10);
+            order = isNaN(num) ? undefined : num;
           } else if (key === 'type') {
             const cleanType = value.replace(/^['"]|['"]$/g, '').trim().toLowerCase();
-            if (cleanType === 'post' || cleanType === 'blog') {
+            if (cleanType === 'project') {
+              type = 'project';
+            } else if (cleanType === 'post' || cleanType === 'blog') {
               type = 'post';
             } else {
               type = 'note';
@@ -234,9 +293,13 @@ export function parseMarkdownNote(rawContent: string, defaultFileName?: string) 
     }
   }
 
-  // Auto-detect post type if post-specific metadata exists
-  if (!type && (description !== undefined || author !== undefined || featured !== undefined)) {
-    type = 'post';
+  // Auto-detect project or post type if specific metadata exists
+  if (!type) {
+    if (slug !== undefined || status !== undefined || year !== undefined || url !== undefined || github !== undefined || order !== undefined) {
+      type = 'project';
+    } else if (description !== undefined || author !== undefined || project !== undefined || featured !== undefined) {
+      type = 'post';
+    }
   }
 
   // Clean legacy raw HTML content strings if necessary
@@ -257,7 +320,14 @@ export function parseMarkdownNote(rawContent: string, defaultFileName?: string) 
     date,
     description,
     author,
+    project,
     featured,
+    slug,
+    status,
+    year,
+    url,
+    github,
+    order,
   };
 }
 
@@ -272,6 +342,31 @@ export function serializeNoteToMarkdown(
 ): string {
   if (typeof noteOrTitle === 'object' && noteOrTitle !== null) {
     const note = noteOrTitle;
+    if (note.type === 'project') {
+      const slugVal = note.slug || slugify(note.title || 'untitled');
+      const statusVal = note.status || 'Active';
+      const currentYear = note.createdAt ? new Date(note.createdAt).getFullYear() : 2026;
+      const yearVal = note.year || currentYear;
+      const orderVal = note.order ?? 1;
+
+      const lines = [
+        '---',
+        `title: "${(note.title || '').replace(/"/g, '\\"')}"`,
+        `slug: ${slugVal}`,
+        `description: "${(note.description || '').replace(/"/g, '\\"')}"`,
+        `status: ${statusVal}`,
+        `year: ${yearVal}`,
+        ...(note.url ? [`url: ${note.url}`] : []),
+        ...(note.github ? [`github: ${note.github}`] : []),
+        ...(note.tags && note.tags.length > 0 ? [`tags: [${note.tags.map((t) => `"${t}"`).join(', ')}]`] : []),
+        `type: project`,
+        `order: ${orderVal}`,
+        '---',
+        '',
+      ];
+      return lines.join('\n') + (note.content || '');
+    }
+
     if (note.type === 'post') {
       const dateStr = note.date || formatBlogDate(note.createdAt || Date.now());
       const lines = [
@@ -280,6 +375,7 @@ export function serializeNoteToMarkdown(
         `date: "${dateStr.replace(/"/g, '\\"')}"`,
         `description: "${(note.description || '').replace(/"/g, '\\"')}"`,
         `author: "${(note.author || '').replace(/"/g, '\\"')}"`,
+        ...(note.project ? [`project: ${note.project}`] : []),
         `tags: [${(note.tags || []).map((t) => `"${t}"`).join(', ')}]`,
         `featured: ${Boolean(note.featured)}`,
         `type: post`,
@@ -335,9 +431,9 @@ export function extractHashtags(text: string): string[] {
 }
 
 /**
- * Renders Markdown string to sanitized HTML string
+ * Renders Markdown string to sanitized HTML string, optionally resolving attached image assets
  */
-export function renderMarkdownToHtml(markdownContent: string): string {
+export function renderMarkdownToHtml(markdownContent: string, images?: NoteImage[]): string {
   if (!markdownContent) return '';
   let cleanMarkdown = markdownContent;
   if (cleanMarkdown.trim().startsWith('<p>') && cleanMarkdown.includes('</p>')) {
@@ -351,7 +447,36 @@ export function renderMarkdownToHtml(markdownContent: string): string {
   });
 
   try {
-    const rawHtml = marked.parse(cleanMarkdown) as string;
+    let rawHtml = marked.parse(cleanMarkdown) as string;
+
+    // Resolve images: if images array is provided, map relative src to dataUrl and add data-relative-path
+    if (images && images.length > 0) {
+      rawHtml = rawHtml.replace(/<img\s+([^>]*?)src="([^"]+)"([^>]*?)>/gi, (match, before, src, after) => {
+        // Find matching image by relativePath, name, or id
+        const cleanSrc = src.replace(/^\.\//, '');
+        const matched = images.find(
+          (img) =>
+            img.relativePath === src ||
+            img.relativePath.replace(/^\.\//, '') === cleanSrc ||
+            img.name === cleanSrc ||
+            img.name === src.split('/').pop() ||
+            img.id === src
+        );
+
+        if (matched && matched.dataUrl) {
+          const relativeAttr = `data-relative-path="${matched.relativePath || src}"`;
+          return `<img ${before}src="${matched.dataUrl}" ${relativeAttr} class="max-w-full h-auto rounded my-2 border border-neutral-200 dark:border-neutral-800 shadow-sm inline-block"${after}>`;
+        }
+
+        return `<img ${before}src="${src}" data-relative-path="${src}" class="max-w-full h-auto rounded my-2 border border-neutral-200 dark:border-neutral-800 shadow-sm inline-block"${after}>`;
+      });
+    } else {
+      // Add default styling class to standard images
+      rawHtml = rawHtml.replace(/<img\s+([^>]*?)src="([^"]+)"([^>]*?)>/gi, (match, before, src, after) => {
+        return `<img ${before}src="${src}" data-relative-path="${src}" class="max-w-full h-auto rounded my-2 border border-neutral-200 dark:border-neutral-800 shadow-sm inline-block"${after}>`;
+      });
+    }
+
     // 1. Remove disabled attribute from checkbox inputs so they can be clicked/toggled
     // 2. Strip inline style attributes from raw tags to prevent dark mode color issues
     // 3. Strip deprecated <font> tags

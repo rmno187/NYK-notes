@@ -9,6 +9,7 @@ import {
   Quote,
   CheckSquare,
   Link as LinkIcon,
+  Image as ImageIcon,
   Table,
   Minus,
   Undo,
@@ -126,6 +127,21 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
               <LinkIcon className="w-4 h-4" />
             </button>
 
+            <button
+              type="button"
+              onMouseDown={handleActionStart}
+              onTouchStart={handleActionStart}
+              onClick={() => onFormat('image')}
+              title="Insert Image"
+              className={`p-1.5 rounded-full md:rounded-md transition-colors shrink-0 ${
+                activeFormats.image
+                  ? 'bg-blue-600 text-white md:bg-neutral-200 md:dark:bg-neutral-800 md:text-blue-600 md:dark:text-blue-400 font-bold'
+                  : 'text-neutral-300 md:text-neutral-600 md:dark:text-neutral-400 hover:text-white md:hover:text-neutral-900 md:dark:hover:text-neutral-100 hover:bg-neutral-800/80 md:hover:bg-neutral-100 md:dark:hover:bg-neutral-800/60'
+              }`}
+            >
+              <ImageIcon className="w-4 h-4" />
+            </button>
+
             <div className="w-px h-4 bg-neutral-700/60 md:bg-neutral-200 md:dark:bg-neutral-800 mx-1 shrink-0" />
 
             <button
@@ -228,6 +244,17 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
               }`}
             >
               <CheckSquare className="w-4 h-4" />
+            </button>
+
+            <button
+              type="button"
+              onMouseDown={handleActionStart}
+              onTouchStart={handleActionStart}
+              onClick={() => onFormat('image')}
+              title="Insert Image"
+              className="p-1.5 rounded-full md:rounded-md transition-colors text-neutral-300 md:text-neutral-600 md:dark:text-neutral-400 hover:text-white md:hover:text-neutral-900 md:dark:hover:text-neutral-100 hover:bg-neutral-800/80 md:hover:bg-neutral-100 md:dark:hover:bg-neutral-800/60 shrink-0"
+            >
+              <ImageIcon className="w-4 h-4" />
             </button>
 
             <button

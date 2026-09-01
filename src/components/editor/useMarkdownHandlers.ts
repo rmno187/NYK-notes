@@ -9,6 +9,7 @@ interface UseMarkdownHandlersProps {
   handleUndo: () => void;
   handleRedo: () => void;
   onOpenLinkModal: (initialText: string, sel: { start: number; end: number }) => void;
+  onOpenImageModal?: () => void;
 }
 
 export function useMarkdownHandlers({
@@ -18,6 +19,7 @@ export function useMarkdownHandlers({
   handleUndo,
   handleRedo,
   onOpenLinkModal,
+  onOpenImageModal,
 }: UseMarkdownHandlersProps) {
   const handleMarkdownFormatAction = useCallback(
     (type: FormatActionType) => {
@@ -33,6 +35,13 @@ export function useMarkdownHandlers({
         return;
       }
 
+      if (type === 'image') {
+        if (onOpenImageModal) {
+          onOpenImageModal();
+        }
+        return;
+      }
+
       const fmtType = type === 'h2' ? 'heading' : type;
       const formatted = applyFormatting(content, start, end, fmtType as any);
       onChangeContent(formatted.text);
@@ -44,7 +53,7 @@ export function useMarkdownHandlers({
         }
       }, 10);
     },
-    [textareaRef, content, onChangeContent, onOpenLinkModal]
+    [textareaRef, content, onChangeContent, onOpenLinkModal, onOpenImageModal]
   );
 
   const handleMarkdownKeyDown = useCallback(

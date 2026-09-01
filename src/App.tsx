@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { Note, StorageMode, Theme, EditorMode } from './types';
+import { Note, StorageMode, Theme, EditorMode, NoteType, NoteImage, ImageFolderStrategy } from './types';
 import {
   getIndexedDBNotes,
   saveIndexedDBNote,
@@ -14,7 +14,7 @@ import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { convertHtmlToMarkdown, parseMarkdownNote, formatBlogDate } from './lib/markdown';
 import { saveNoteToLocalFolder, openLocalMarkdownFile } from './lib/localFileOperations';
 import { isMac, modSymbol } from './lib/platform';
-import { isNoteEmpty } from './lib/noteUtils';
+import { isNoteEmpty, slugify } from './lib/noteUtils';
 import { Sidebar } from './components/Sidebar';
 import { EditorPane } from './components/EditorPane';
 import { DirectorySelectorModal } from './components/DirectorySelectorModal';
@@ -91,6 +91,29 @@ function calculateWordCount(text: string): number {
     tags: ['markdown', 'cheatsheet'],
     createdAt: Date.now() - 7200000,
     updatedAt: Date.now() - 1800000,
+    pinned: false,
+  },
+  {
+    id: 'welcome-project-1',
+    title: 'Thermhold',
+    slug: 'thermhold',
+    description: 'A portfolio tracker built around long-term market cycles.',
+    status: 'Active',
+    year: 2026,
+    url: 'https://example.com/thermhold',
+    github: 'https://github.com/rmno18/thermhold',
+    type: 'project',
+    order: 1,
+    content: `# Thermhold
+
+A portfolio tracker built around long-term market cycles.
+
+- Market cycle valuation indicators
+- Live wallet balance tracking
+`,
+    tags: ['portfolio', 'crypto'],
+    createdAt: Date.now() - 10800000,
+    updatedAt: Date.now() - 5400000,
     pinned: false,
   },
 ];
@@ -228,6 +251,33 @@ export default function App() {
     return Array.from(tagSet).sort();
   }, [notes]);
 
+  // Compute all unique projects across notes and project-type notes
+  const allProjects = useMemo(() => {
+    const projectSet = new Set<string>();
+    notes.forEach((n) => {
+      if (n.deletedAt) return;
+      if (n.type === 'project') {
+        const identifier = (n.slug || (n.title ? slugify(n.title) : '') || '').trim();
+        if (identifier) projectSet.add(identifier);
+      }
+      if (n.project) {
+        projectSet.add(n.project.trim());
+      }
+    });
+    return Array.from(projectSet).filter(Boolean).sort();
+  }, [notes]);
+
+  // Compute all unique authors across notes
+  const allAuthors = useMemo(() => {
+    const authorSet = new Set<string>();
+    notes.forEach((n) => {
+      if (n.author && !n.deletedAt) {
+        authorSet.add(n.author.trim());
+      }
+    });
+    return Array.from(authorSet).filter(Boolean).sort();
+  }, [notes]);
+
   // Active Note Object
   const activeNote = useMemo(() => {
     return notes.find((n) => n.id === activeNoteId) || null;
@@ -333,6 +383,25 @@ export default function App() {
     [activeNoteId, persistNote]
   );
 
+  // Update Note Project (Blog mode)
+  const handleProjectChange = useCallback(
+    (newProject: string) => {
+      if (!activeNoteId) return;
+
+      setNotes((prev) =>
+        prev.map((note) => {
+          if (note.id === activeNoteId) {
+            const updated = { ...note, project: newProject, updatedAt: Date.now() };
+            persistNote(updated);
+            return updated;
+          }
+          return note;
+        })
+      );
+    },
+    [activeNoteId, persistNote]
+  );
+
   // Toggle Featured (Blog mode)
   const handleToggleFeatured = useCallback(() => {
     if (!activeNoteId) return;
@@ -349,9 +418,211 @@ export default function App() {
     );
   }, [activeNoteId, persistNote]);
 
-  // Update Note Type (Convert between Note and Blog post)
+  // Update Project Slug (Project mode)
+  const handleSlugChange = useCallback(
+    (newSlug: string) => {
+      if (!activeNoteId) return;
+
+      setNotes((prev) =>
+        prev.map((note) => {
+          if (note.id === activeNoteId) {
+            const updated = { ...note, slug: newSlug, updatedAt: Date.now() };
+            persistNote(updated);
+            return updated;
+          }
+          return note;
+        })
+      );
+    },
+    [activeNoteId, persistNote]
+  );
+
+  // Update Project Status (Project mode)
+  const handleStatusChange = useCallback(
+    (newStatus: string) => {
+      if (!activeNoteId) return;
+
+      setNotes((prev) =>
+        prev.map((note) => {
+          if (note.id === activeNoteId) {
+            const updated = { ...note, status: newStatus, updatedAt: Date.now() };
+            persistNote(updated);
+            return updated;
+          }
+          return note;
+        })
+      );
+    },
+    [activeNoteId, persistNote]
+  );
+
+  // Update Project Year (Project mode)
+  const handleYearChange = useCallback(
+    (newYear: number | string) => {
+      if (!activeNoteId) return;
+
+      setNotes((prev) =>
+        prev.map((note) => {
+          if (note.id === activeNoteId) {
+            const parsedYear =
+              typeof newYear === 'string' ? (newYear === '' ? undefined : parseInt(newYear, 10)) : newYear;
+            const updated = { ...note, year: parsedYear, updatedAt: Date.now() };
+            persistNote(updated);
+            return updated;
+          }
+          return note;
+        })
+      );
+    },
+    [activeNoteId, persistNote]
+  );
+
+  // Update Project URL (Project mode)
+  const handleUrlChange = useCallback(
+    (newUrl: string) => {
+      if (!activeNoteId) return;
+
+      setNotes((prev) =>
+        prev.map((note) => {
+          if (note.id === activeNoteId) {
+            const updated = { ...note, url: newUrl, updatedAt: Date.now() };
+            persistNote(updated);
+            return updated;
+          }
+          return note;
+        })
+      );
+    },
+    [activeNoteId, persistNote]
+  );
+
+  // Update Project GitHub (Project mode)
+  const handleGithubChange = useCallback(
+    (newGithub: string) => {
+      if (!activeNoteId) return;
+
+      setNotes((prev) =>
+        prev.map((note) => {
+          if (note.id === activeNoteId) {
+            const updated = { ...note, github: newGithub, updatedAt: Date.now() };
+            persistNote(updated);
+            return updated;
+          }
+          return note;
+        })
+      );
+    },
+    [activeNoteId, persistNote]
+  );
+
+  // Update Project Order (Project mode)
+  const handleOrderChange = useCallback(
+    (newOrder: number) => {
+      if (!activeNoteId) return;
+
+      setNotes((prev) =>
+        prev.map((note) => {
+          if (note.id === activeNoteId) {
+            const updated = { ...note, order: newOrder, updatedAt: Date.now() };
+            persistNote(updated);
+            return updated;
+          }
+          return note;
+        })
+      );
+    },
+    [activeNoteId, persistNote]
+  );
+
+  // Update Note Type (Convert between Note, Blog post, and Project)
   const handleTypeChange = useCallback(
-    (newType: 'note' | 'post') => {
+    (newType: NoteType) => {
+      if (!activeNoteId) return;
+
+      setNotes((prev) =>
+        prev.map((note) => {
+          if (note.id === activeNoteId) {
+            const isBlog = newType === 'post';
+            const isProject = newType === 'project';
+
+            const updated: Note = {
+              ...note,
+              type: newType,
+              date: note.date || (isBlog ? formatBlogDate(note.createdAt) : undefined),
+              description: note.description || (isBlog || isProject ? '' : undefined),
+              author: note.author || (isBlog ? '' : undefined),
+              project: note.project || (isBlog ? '' : undefined),
+              featured: note.featured !== undefined ? note.featured : (isBlog ? false : undefined),
+              slug: note.slug || (isProject ? (note.title ? slugify(note.title) : '') : undefined),
+              status: note.status || (isProject ? 'Active' : undefined),
+              year: note.year !== undefined ? note.year : (isProject ? new Date().getFullYear() : undefined),
+              url: note.url || (isProject ? '' : undefined),
+              github: note.github || (isProject ? '' : undefined),
+              order: note.order !== undefined ? note.order : (isProject ? 1 : undefined),
+              updatedAt: Date.now(),
+            };
+            persistNote(updated);
+            return updated;
+          }
+          return note;
+        })
+      );
+    },
+    [activeNoteId, persistNote]
+  );
+
+  // Add or update an image attached to the active note
+  const handleAddImage = useCallback(
+    (image: NoteImage) => {
+      if (!activeNoteId) return;
+
+      setNotes((prev) =>
+        prev.map((note) => {
+          if (note.id === activeNoteId) {
+            const existingImages = note.images || [];
+            const filtered = existingImages.filter((img) => img.id !== image.id);
+            const updated: Note = {
+              ...note,
+              images: [...filtered, image],
+              updatedAt: Date.now(),
+            };
+            persistNote(updated);
+            return updated;
+          }
+          return note;
+        })
+      );
+    },
+    [activeNoteId, persistNote]
+  );
+
+  // Remove an attached image from the active note
+  const handleRemoveImage = useCallback(
+    (imageId: string) => {
+      if (!activeNoteId) return;
+
+      setNotes((prev) =>
+        prev.map((note) => {
+          if (note.id === activeNoteId) {
+            const existingImages = note.images || [];
+            const updated: Note = {
+              ...note,
+              images: existingImages.filter((img) => img.id !== imageId),
+              updatedAt: Date.now(),
+            };
+            persistNote(updated);
+            return updated;
+          }
+          return note;
+        })
+      );
+    },
+    [activeNoteId, persistNote]
+  );
+
+  // Update folder structure strategy for images
+  const handleChangeImageFolderStrategy = useCallback(
+    (strategy: ImageFolderStrategy) => {
       if (!activeNoteId) return;
 
       setNotes((prev) =>
@@ -359,11 +630,7 @@ export default function App() {
           if (note.id === activeNoteId) {
             const updated: Note = {
               ...note,
-              type: newType,
-              date: note.date || (newType === 'post' ? formatBlogDate(note.createdAt) : undefined),
-              description: note.description || (newType === 'post' ? '' : undefined),
-              author: note.author || (newType === 'post' ? '' : undefined),
-              featured: note.featured !== undefined ? note.featured : (newType === 'post' ? false : undefined),
+              imageFolderStrategy: strategy,
               updatedAt: Date.now(),
             };
             persistNote(updated);
@@ -437,11 +704,11 @@ export default function App() {
     setMobileView('list');
   }, [activeNoteId, checkAndDeleteEmptyNote]);
 
-  // Create New Note or Blog Post
+  // Create New Note, Blog Post, or Project
   const handleNewNote = useCallback(
     (
       initialParams?: string | { title?: string; content?: string },
-      noteType?: 'note' | 'post'
+      noteType?: NoteType
     ) => {
       let title = '';
       let content = '';
@@ -453,7 +720,9 @@ export default function App() {
         content = initialParams.content || '';
       }
 
-      const isBlog = noteType === 'post';
+      const type: NoteType = noteType || 'note';
+      const isBlog = type === 'post';
+      const isProject = type === 'project';
 
       const newNote: Note = {
         id: `note-${Date.now().toString(36)}`,
@@ -463,11 +732,18 @@ export default function App() {
         createdAt: Date.now(),
         updatedAt: Date.now(),
         pinned: false,
-        type: isBlog ? 'post' : 'note',
+        type: type,
         date: isBlog ? formatBlogDate() : undefined,
-        description: isBlog ? '' : undefined,
+        description: isBlog || isProject ? '' : undefined,
         author: isBlog ? '' : undefined,
+        project: isBlog ? '' : undefined,
         featured: isBlog ? false : undefined,
+        slug: isProject ? (title ? slugify(title) : '') : undefined,
+        status: isProject ? 'Active' : undefined,
+        year: isProject ? new Date().getFullYear() : undefined,
+        url: isProject ? '' : undefined,
+        github: isProject ? '' : undefined,
+        order: isProject ? 1 : undefined,
       };
 
       setNotes((prev) => {
@@ -798,6 +1074,7 @@ export default function App() {
         date: parsed.date,
         description: parsed.description,
         author: parsed.author,
+        project: parsed.project,
         featured: parsed.featured,
         createdAt: file.lastModified || Date.now(),
         updatedAt: file.lastModified || Date.now(),
@@ -977,8 +1254,20 @@ export default function App() {
               onChangeContent={handleContentChange}
               onChangeDescription={handleDescriptionChange}
               onChangeAuthor={handleAuthorChange}
+              allAuthors={allAuthors}
+              onChangeProject={handleProjectChange}
+              allProjects={allProjects}
               onToggleFeatured={handleToggleFeatured}
+              onChangeSlug={handleSlugChange}
+              onChangeStatus={handleStatusChange}
+              onChangeYear={handleYearChange}
+              onChangeUrl={handleUrlChange}
+              onChangeGithub={handleGithubChange}
+              onChangeOrder={handleOrderChange}
               onChangeType={handleTypeChange}
+              onAddImage={handleAddImage}
+              onRemoveImage={handleRemoveImage}
+              onChangeImageFolderStrategy={handleChangeImageFolderStrategy}
               onTogglePin={() => handleTogglePin(activeNote.id)}
               onDeleteNote={() => handleDeleteNote(activeNote.id)}
               onRestoreNote={() => handleRestoreNote(activeNote.id)}

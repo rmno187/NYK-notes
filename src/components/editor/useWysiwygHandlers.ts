@@ -17,6 +17,7 @@ interface UseWysiwygHandlersProps {
   activeFormats: ActiveFormats;
   setActiveFormats: React.Dispatch<React.SetStateAction<ActiveFormats>>;
   onOpenLinkModal: (initialText: string, range: Range | null) => void;
+  onOpenImageModal?: () => void;
 }
 
 export function useWysiwygHandlers({
@@ -28,6 +29,7 @@ export function useWysiwygHandlers({
   activeFormats,
   setActiveFormats,
   onOpenLinkModal,
+  onOpenImageModal,
 }: UseWysiwygHandlersProps) {
   // Check active formatting at cursor selection
   const checkActiveFormats = useCallback(() => {
@@ -491,6 +493,12 @@ export function useWysiwygHandlers({
               text = rangeToSave.toString();
             }
             onOpenLinkModal(text, rangeToSave);
+          }
+          break;
+        }
+        case 'image': {
+          if (onOpenImageModal) {
+            onOpenImageModal();
           }
           break;
         }

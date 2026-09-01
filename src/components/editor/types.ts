@@ -1,4 +1,4 @@
-import { Note, EditorMode, StorageMode, Theme } from '../../types';
+import { Note, EditorMode, StorageMode, Theme, NoteType, NoteImage, ImageFolderStrategy } from '../../types';
 
 export interface ActiveFormats {
   bold: boolean;
@@ -12,6 +12,7 @@ export interface ActiveFormats {
   quote: boolean;
   code: boolean;
   link: boolean;
+  image?: boolean;
 }
 
 export type FormatActionType =
@@ -23,6 +24,7 @@ export type FormatActionType =
   | 'code'
   | 'quote'
   | 'link'
+  | 'image'
   | 'bullet'
   | 'number'
   | 'task'
@@ -55,12 +57,26 @@ export interface EditorPaneProps {
   onSaveToLocalFolder?: () => Promise<void> | void;
   onOpenLocalFile?: () => Promise<void> | void;
   toastMessage?: string | null;
-  // Blog Post Fields
+  // Blog Post & Shared Fields
   onChangeDescription?: (description: string) => void;
   onChangeAuthor?: (author: string) => void;
+  onChangeProject?: (project: string) => void;
+  allProjects?: string[];
+  allAuthors?: string[];
   onToggleFeatured?: () => void;
-  onChangeType?: (type: 'note' | 'post') => void;
+  onChangeType?: (type: NoteType) => void;
   onChangeDate?: (date: string) => void;
+  // Project specific handlers
+  onChangeSlug?: (slug: string) => void;
+  onChangeStatus?: (status: string) => void;
+  onChangeYear?: (year: number | string) => void;
+  onChangeUrl?: (url: string) => void;
+  onChangeGithub?: (github: string) => void;
+  onChangeOrder?: (order: number) => void;
+  // Image assets management
+  onAddImage?: (image: NoteImage) => void;
+  onRemoveImage?: (imageId: string) => void;
+  onChangeImageFolderStrategy?: (strategy: ImageFolderStrategy) => void;
   // App Options & Settings
   theme?: Theme;
   onToggleTheme?: () => void;
