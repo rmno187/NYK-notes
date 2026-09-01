@@ -23,7 +23,8 @@ interface EditorToolbarProps {
   onFormat: (type: FormatActionType) => void;
   onUndo: () => void;
   onRedo: () => void;
-  caretPosition?: { top: number; bottom: number; left?: number } | null;
+  keyboardOffset?: number;
+  isKeyboardOpen?: boolean;
 }
 
 export const EditorToolbar: React.FC<EditorToolbarProps> = ({
@@ -32,51 +33,43 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
   onFormat,
   onUndo,
   onRedo,
-  caretPosition,
+  keyboardOffset = 0,
+  isKeyboardOpen = false,
 }) => {
-  // Compute floating style for mobile positioning relative to cursor
+  // Compute dynamic bottom positioning on mobile so toolbar sticks precisely to keyboard
   const getMobileToolbarStyle = (): React.CSSProperties => {
-    if (!caretPosition) {
+    // If keyboard is active or offset detected on mobile
+    if (keyboardOffset > 0 || isKeyboardOpen) {
       return {
-        bottom: 'max(0.75rem, env(safe-area-inset-bottom))',
+        bottom: `${keyboardOffset + 8}px`,
       };
     }
 
-    const viewportHeight = window.innerHeight;
-    const isLowerScreen = caretPosition.bottom > viewportHeight * 0.55;
+    return {
+      bottom: 'max(0.75rem, env(safe-area-inset-bottom))',
+    };
+  };
 
-    if (isLowerScreen) {
-      // Place ~24px above the cursor line
-      const topPos = Math.max(70, caretPosition.top - 54);
-      return {
-        top: `${topPos}px`,
-        bottom: 'auto',
-      };
-    } else {
-      // Place ~20px below the cursor line
-      const topPos = Math.min(viewportHeight - 70, caretPosition.bottom + 18);
-      return {
-        top: `${topPos}px`,
-        bottom: 'auto',
-      };
-    }
+  // Prevent blur on touch / mouse down to keep keyboard open during formatting
+  const handleActionStart = (e: React.MouseEvent | React.TouchEvent) => {
+    e.preventDefault();
   };
 
   return (
     <div
-      onMouseDown={(e) => e.preventDefault()}
-      className={`pointer-events-none z-30 flex justify-center px-4 w-full md:static md:pointer-events-auto md:w-auto md:px-5 md:py-1.5 md:border-b md:border-neutral-200 md:dark:border-neutral-800 md:bg-transparent select-none order-2 md:order-1 ${
-        caretPosition ? 'fixed left-0 transition-all duration-150 ease-out' : 'sticky bottom-3'
-      }`}
+      onMouseDown={handleActionStart}
+      onTouchStart={handleActionStart}
+      className={`fixed left-0 right-0 z-30 flex justify-center px-3 sm:px-4 w-full md:static md:pointer-events-auto md:w-auto md:px-5 md:py-1.5 md:border-b md:border-neutral-200 md:dark:border-neutral-800 md:bg-transparent select-none order-2 md:order-1 transition-[bottom] duration-100 ease-out pointer-events-none`}
       style={getMobileToolbarStyle()}
     >
-      <div className="pointer-events-auto flex items-center gap-1 overflow-x-auto scrollbar-none px-2.5 py-1 bg-neutral-900/90 dark:bg-neutral-900/90 md:bg-transparent text-neutral-100 md:text-inherit rounded-full md:rounded-none shadow-xl md:shadow-none border border-neutral-700/60 dark:border-neutral-700/60 md:border-none backdrop-blur-md max-w-full">
+      <div className="pointer-events-auto flex items-center gap-1 overflow-x-auto scrollbar-none px-2.5 py-1 bg-neutral-900/95 dark:bg-neutral-900/95 md:bg-transparent text-neutral-100 md:text-inherit rounded-full md:rounded-none shadow-2xl md:shadow-none border border-neutral-700/70 dark:border-neutral-700/70 md:border-none backdrop-blur-md max-w-full">
         {hasTextSelection ? (
           /* Selection Toolbar: B, I, U, link, H1, H2, code block, quote */
           <>
             <button
               type="button"
-              onMouseDown={(e) => e.preventDefault()}
+              onMouseDown={handleActionStart}
+              onTouchStart={handleActionStart}
               onClick={() => onFormat('bold')}
               title={`Bold (${modSymbol}B)`}
               className={`p-1.5 rounded-full md:rounded-md transition-colors shrink-0 ${
@@ -90,7 +83,8 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
 
             <button
               type="button"
-              onMouseDown={(e) => e.preventDefault()}
+              onMouseDown={handleActionStart}
+              onTouchStart={handleActionStart}
               onClick={() => onFormat('italic')}
               title={`Italic (${modSymbol}I)`}
               className={`p-1.5 rounded-full md:rounded-md transition-colors shrink-0 ${
@@ -104,7 +98,8 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
 
             <button
               type="button"
-              onMouseDown={(e) => e.preventDefault()}
+              onMouseDown={handleActionStart}
+              onTouchStart={handleActionStart}
               onClick={() => onFormat('underline')}
               title="Underline"
               className={`p-1.5 rounded-full md:rounded-md transition-colors shrink-0 ${
@@ -118,7 +113,8 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
 
             <button
               type="button"
-              onMouseDown={(e) => e.preventDefault()}
+              onMouseDown={handleActionStart}
+              onTouchStart={handleActionStart}
               onClick={() => onFormat('link')}
               title="Insert Link"
               className={`p-1.5 rounded-full md:rounded-md transition-colors shrink-0 ${
@@ -134,7 +130,8 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
 
             <button
               type="button"
-              onMouseDown={(e) => e.preventDefault()}
+              onMouseDown={handleActionStart}
+              onTouchStart={handleActionStart}
               onClick={() => onFormat('heading')}
               title="Heading 1"
               className={`p-1.5 rounded-full md:rounded-md transition-colors shrink-0 ${
@@ -148,7 +145,8 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
 
             <button
               type="button"
-              onMouseDown={(e) => e.preventDefault()}
+              onMouseDown={handleActionStart}
+              onTouchStart={handleActionStart}
               onClick={() => onFormat('h2')}
               title="Heading 2"
               className={`p-1.5 rounded-full md:rounded-md transition-colors shrink-0 ${
@@ -162,7 +160,8 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
 
             <button
               type="button"
-              onMouseDown={(e) => e.preventDefault()}
+              onMouseDown={handleActionStart}
+              onTouchStart={handleActionStart}
               onClick={() => onFormat('code')}
               title="Code Block"
               className={`p-1.5 rounded-full md:rounded-md transition-colors shrink-0 ${
@@ -176,7 +175,8 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
 
             <button
               type="button"
-              onMouseDown={(e) => e.preventDefault()}
+              onMouseDown={handleActionStart}
+              onTouchStart={handleActionStart}
               onClick={() => onFormat('quote')}
               title="Quote"
               className={`p-1.5 rounded-full md:rounded-md transition-colors shrink-0 ${
@@ -193,7 +193,8 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
           <>
             <button
               type="button"
-              onMouseDown={(e) => e.preventDefault()}
+              onMouseDown={handleActionStart}
+              onTouchStart={handleActionStart}
               onClick={onUndo}
               title={`Undo (${modSymbol}Z)`}
               className="p-1.5 rounded-full md:rounded-md transition-colors text-neutral-300 md:text-neutral-600 md:dark:text-neutral-400 hover:text-white md:hover:text-neutral-900 md:dark:hover:text-neutral-100 hover:bg-neutral-800/80 md:hover:bg-neutral-100 md:dark:hover:bg-neutral-800/60 shrink-0"
@@ -203,7 +204,8 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
 
             <button
               type="button"
-              onMouseDown={(e) => e.preventDefault()}
+              onMouseDown={handleActionStart}
+              onTouchStart={handleActionStart}
               onClick={onRedo}
               title={`Redo (${modSymbol}Y)`}
               className="p-1.5 rounded-full md:rounded-md transition-colors text-neutral-300 md:text-neutral-600 md:dark:text-neutral-400 hover:text-white md:hover:text-neutral-900 md:dark:hover:text-neutral-100 hover:bg-neutral-800/80 md:hover:bg-neutral-100 md:dark:hover:bg-neutral-800/60 shrink-0"
@@ -215,7 +217,8 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
 
             <button
               type="button"
-              onMouseDown={(e) => e.preventDefault()}
+              onMouseDown={handleActionStart}
+              onTouchStart={handleActionStart}
               onClick={() => onFormat('task')}
               title="Checkbox / Task List"
               className={`p-1.5 rounded-full md:rounded-md transition-colors shrink-0 ${
@@ -229,7 +232,8 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
 
             <button
               type="button"
-              onMouseDown={(e) => e.preventDefault()}
+              onMouseDown={handleActionStart}
+              onTouchStart={handleActionStart}
               onClick={() => onFormat('table')}
               title="Insert Table"
               className="p-1.5 rounded-full md:rounded-md transition-colors text-neutral-300 md:text-neutral-600 md:dark:text-neutral-400 hover:text-white md:hover:text-neutral-900 md:dark:hover:text-neutral-100 hover:bg-neutral-800/80 md:hover:bg-neutral-100 md:dark:hover:bg-neutral-800/60 shrink-0"
@@ -239,7 +243,8 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
 
             <button
               type="button"
-              onMouseDown={(e) => e.preventDefault()}
+              onMouseDown={handleActionStart}
+              onTouchStart={handleActionStart}
               onClick={() => onFormat('hr')}
               title="Horizontal Line"
               className="p-1.5 rounded-full md:rounded-md transition-colors text-neutral-300 md:text-neutral-600 md:dark:text-neutral-400 hover:text-white md:hover:text-neutral-900 md:dark:hover:text-neutral-100 hover:bg-neutral-800/80 md:hover:bg-neutral-100 md:dark:hover:bg-neutral-800/60 shrink-0"

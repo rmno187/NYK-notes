@@ -6,7 +6,7 @@ import { ActiveFormats, HistoryItem, EditorPaneProps, FormatActionType } from '.
 import { getCaretCharacterOffsetWithin, setCaretCharacterOffsetWithin } from './editor/editorUtils';
 import { useWysiwygHandlers } from './editor/useWysiwygHandlers';
 import { useMarkdownHandlers } from './editor/useMarkdownHandlers';
-import { useCaretTracking } from './editor/useCaretTracking';
+import { useKeyboardOffset } from './editor/useKeyboardOffset';
 import { EditorToolbar } from './editor/EditorToolbar';
 import { OptionsSlideout } from './editor/OptionsSlideout';
 import { LinkModal } from './editor/LinkModal';
@@ -298,12 +298,7 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
     onOpenLinkModal: handleOpenLinkModal,
   });
 
-  const { caretPosition } = useCaretTracking({
-    mode,
-    wysiwygRef,
-    textareaRef,
-    contentScrollRef,
-  });
+  const { isKeyboardOpen, bottomInset } = useKeyboardOffset();
 
   // Unified formatting trigger
   const handleFormat = (type: FormatActionType) => {
@@ -471,7 +466,8 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
         onFormat={handleFormat}
         onUndo={handleUndo}
         onRedo={handleRedo}
-        caretPosition={caretPosition}
+        keyboardOffset={bottomInset}
+        isKeyboardOpen={isKeyboardOpen}
       />
 
       {/* Content Area: Title + WYSIWYG or Raw Markdown */}
