@@ -88,9 +88,32 @@ class LocalFolderManager {
   };
 
   private initialized = false;
+  private listeners: Set<(config: LocalFolderConfig) => void> = new Set();
+
+  subscribe(callback: (config: LocalFolderConfig) => void): () => void {
+    this.listeners.add(callback);
+    callback(this.getConfig());
+    return () => {
+      this.listeners.delete(callback);
+    };
+  }
+
+  private notify() {
+    const current = this.getConfig();
+    this.listeners.forEach((listener) => {
+      try {
+        listener(current);
+      } catch (e) {
+        console.error('Error in localFolderManager subscriber:', e);
+      }
+    });
+  }
 
   async initialize(): Promise<LocalFolderConfig> {
-    if (this.initialized) return this.config;
+    if (this.initialized) {
+      this.notify();
+      return this.config;
+    }
 
     try {
       const rootHandle = await getHandleFromIDB('folder_root');
@@ -112,6 +135,7 @@ class LocalFolderManager {
       };
 
       this.initialized = true;
+      this.notify();
     } catch (err) {
       console.warn('Failed to load saved directory handles:', err);
     }
@@ -126,6 +150,7 @@ class LocalFolderManager {
   setAutoSync(enabled: boolean) {
     this.config.autoSyncToDisk = enabled;
     localStorage.setItem('local_auto_sync_to_disk', String(enabled));
+    this.notify();
   }
 
   hasAnyFolderConfigured(): boolean {
@@ -172,6 +197,7 @@ class LocalFolderManager {
       this.config.rootHandle = handle;
       this.config.rootName = handle.name;
       await saveHandleToIDB('folder_root', handle);
+      this.notify();
 
       return handle;
     } catch (err: any) {
@@ -210,6 +236,7 @@ class LocalFolderManager {
         await saveHandleToIDB('folder_notes', handle);
       }
 
+      this.notify();
       return handle;
     } catch (err: any) {
       if (err.name === 'AbortError') return null;
@@ -236,6 +263,7 @@ class LocalFolderManager {
       this.config.notesName = '';
       await removeHandleFromIDB('folder_notes');
     }
+    this.notify();
   }
 
   // Resolve which directory handle should be used for a given note

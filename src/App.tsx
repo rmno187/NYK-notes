@@ -23,6 +23,8 @@ import { SyncModal } from './components/SyncModal';
 import { BackupModal } from './components/BackupModal';
 import { ImportModal } from './components/ImportModal';
 import { ShortcutsModal } from './components/ShortcutsModal';
+import { LocalFolderSyncModal } from './components/LocalFolderSyncModal';
+import { localFolderManager } from './lib/localFolderManager';
 
 const DEFAULT_WELCOME_NOTES: Note[] = [
   {
@@ -148,10 +150,23 @@ export default function App() {
 
   // Modals
   const [isDirectoryModalOpen, setIsDirectoryModalOpen] = useState(false);
+  const [isLocalFolderSyncModalOpen, setIsLocalFolderSyncModalOpen] = useState(false);
+  const [isLocalFolderConfigured, setIsLocalFolderConfigured] = useState(false);
   const [isSyncModalOpen, setIsSyncModalOpen] = useState(false);
   const [isBackupModalOpen, setIsBackupModalOpen] = useState(false);
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [isShortcutsModalOpen, setIsShortcutsModalOpen] = useState(false);
+
+  // Initialize and subscribe to Local Folder Sync configuration
+  useEffect(() => {
+    localFolderManager.initialize().then(() => {
+      setIsLocalFolderConfigured(localFolderManager.hasAnyFolderConfigured());
+    });
+    const unsubscribe = localFolderManager.subscribe(() => {
+      setIsLocalFolderConfigured(localFolderManager.hasAnyFolderConfigured());
+    });
+    return () => unsubscribe();
+  }, []);
 
   // Apply Theme Class & Save
   useEffect(() => {
@@ -286,7 +301,7 @@ export default function App() {
 
   // Handle Note Save to Active Storage Provider
   const persistNote = useCallback(
-    async (updatedNote: Note) => {
+    async (updatedNote: Note, previousFileName?: string) => {
       // Do not sync or persist empty notes unless it's a deletion tombstone
       if (isNoteEmpty(updatedNote) && !updatedNote.deletedAt) {
         return;
@@ -300,6 +315,32 @@ export default function App() {
           updatedNote.fileName = fileName;
         } else {
           await saveIndexedDBNote(updatedNote);
+        }
+
+        // Auto sync to configured local folders (posts / projects / notes)
+        if (
+          !updatedNote.deletedAt &&
+          localFolderManager.hasAnyFolderConfigured() &&
+          localFolderManager.getConfig().autoSyncToDisk
+        ) {
+          localFolderManager.saveNoteToLocalFolder(updatedNote, previousFileName).then((res) => {
+            if (res) {
+              setNotes((prev) =>
+                prev.map((n) =>
+                  n.id === updatedNote.id
+                    ? {
+                        ...n,
+                        localBackedUp: true,
+                        localFolderName: res.folderName,
+                        fileName: n.fileName || res.fileName,
+                      }
+                    : n
+                )
+              );
+            }
+          }).catch((err) => {
+            console.warn('Auto local folder sync error:', err);
+          });
         }
       } catch (err) {
         console.error('Failed to persist note:', err);
@@ -816,6 +857,10 @@ export default function App() {
             } else {
               await deleteIndexedDBNote(noteId);
             }
+
+            if (note && localFolderManager.hasAnyFolderConfigured()) {
+              await localFolderManager.deleteNoteFromLocalFolder(note);
+            }
           } catch (err) {
             console.error('Failed to permanently delete note:', err);
           }
@@ -891,6 +936,11 @@ export default function App() {
           setActiveNoteId(activeRemaining.length > 0 ? activeRemaining[0].id : null);
         }
         persistNote(updated);
+
+        // Also remove file from local mapped folder immediately when sent to trash
+        if (localFolderManager.hasAnyFolderConfigured()) {
+          localFolderManager.deleteNoteFromLocalFolder(noteToDelete).catch(() => {});
+        }
       } else {
         // Permanent delete
         setNotes((prev) => prev.filter((n) => n.id !== noteId));
@@ -907,6 +957,10 @@ export default function App() {
             await deleteNoteFromDirectory(directoryHandle, noteToDelete.fileName);
           } else {
             await deleteIndexedDBNote(noteId);
+          }
+
+          if (localFolderManager.hasAnyFolderConfigured()) {
+            await localFolderManager.deleteNoteFromLocalFolder(noteToDelete);
           }
         } catch (err) {
           console.error('Failed to permanently delete note from storage:', err);
@@ -948,6 +1002,10 @@ export default function App() {
           await deleteNoteFromDirectory(directoryHandle, note.fileName);
         } else {
           await deleteIndexedDBNote(note.id);
+        }
+
+        if (localFolderManager.hasAnyFolderConfigured()) {
+          await localFolderManager.deleteNoteFromLocalFolder(note);
         }
       } catch (err) {
         console.error('Failed to permanently clear trashed note:', err);
@@ -1110,7 +1168,7 @@ export default function App() {
           );
         }
 
-        persistNote(updated);
+        persistNote(updated, oldFileName);
         return prev.map((n) => (n.id === activeNoteId ? updated : n));
       });
 
@@ -1263,6 +1321,7 @@ export default function App() {
     onCloseModals: () => {
       setSearchQuery('');
       setIsDirectoryModalOpen(false);
+      setIsLocalFolderSyncModalOpen(false);
       setIsBackupModalOpen(false);
       setIsImportModalOpen(false);
       setIsShortcutsModalOpen(false);
@@ -1295,6 +1354,8 @@ export default function App() {
           onToggleSearchMode={() => setIsSearchMode((prev) => !prev)}
           storageMode={storageMode}
           onOpenSyncModal={() => setIsSyncModalOpen(true)}
+          onOpenLocalFolderSyncModal={() => setIsLocalFolderSyncModalOpen(true)}
+          isLocalFolderConfigured={isLocalFolderConfigured}
           onOpenLocalFile={handleOpenLocalMarkdownFile}
           className={mobileView === 'editor' ? 'hidden md:flex w-full md:w-80' : 'flex w-full md:w-80'}
         />
@@ -1343,6 +1404,7 @@ export default function App() {
               storageMode={storageMode}
               directoryName={directoryName}
               onOpenDirectoryModal={() => setIsDirectoryModalOpen(true)}
+              onOpenLocalFolderSyncModal={() => setIsLocalFolderSyncModalOpen(true)}
               onOpenSyncModal={() => setIsSyncModalOpen(true)}
               onOpenBackupModal={() => setIsBackupModalOpen(true)}
               onOpenImportModal={() => setIsImportModalOpen(true)}
@@ -1374,9 +1436,29 @@ export default function App() {
         onSelectLocalDirectory={handleSelectLocalDirectory}
         onSwitchToIndexedDB={handleSwitchToIndexedDB}
         onSwitchToVercelSync={handleSwitchToVercelSync}
+        onOpenLocalFolderSyncModal={() => {
+          setIsDirectoryModalOpen(false);
+          setIsLocalFolderSyncModalOpen(true);
+        }}
         onOpenSyncSettings={() => {
           setIsDirectoryModalOpen(false);
           setIsSyncModalOpen(true);
+        }}
+      />
+
+      <LocalFolderSyncModal
+        isOpen={isLocalFolderSyncModalOpen}
+        onClose={() => setIsLocalFolderSyncModalOpen(false)}
+        notes={notes}
+        onSyncComplete={(msg) => showToast(msg)}
+        onNotesUpdated={(updatedNotes) => {
+          setNotes((prev) => {
+            const map = new Map(prev.map((n) => [n.id, n]));
+            for (const u of updatedNotes) {
+              map.set(u.id, u);
+            }
+            return Array.from(map.values());
+          });
         }}
       />
 
