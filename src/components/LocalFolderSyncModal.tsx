@@ -200,10 +200,10 @@ export const LocalFolderSyncModal: React.FC<LocalFolderSyncModalProps> = ({
             </div>
             <div>
               <h2 className="text-sm font-semibold tracking-wide text-black dark:text-white">
-                Local Device & Blog Repo Sync
+                Local Device Sync
               </h2>
               <p className="text-xs text-neutral-500 dark:text-neutral-400">
-                Sync markdown files and assets with your local repository folders.
+                Sync markdown files and assets with your local folders.
               </p>
             </div>
           </div>
@@ -254,79 +254,17 @@ export const LocalFolderSyncModal: React.FC<LocalFolderSyncModalProps> = ({
             </div>
           )}
 
-          {/* Quick Explanation */}
-          <div className="bg-neutral-50 dark:bg-neutral-900/60 border border-neutral-200/80 dark:border-neutral-800/80 rounded p-3 text-xs text-neutral-600 dark:text-neutral-400">
-            <div className="flex items-center gap-1.5 font-medium text-black dark:text-white mb-1">
-              <GitBranch className="w-3.5 h-3.5" />
-              <span>Mobile-to-Laptop Blog Workflow</span>
-            </div>
-            <p className="leading-relaxed">
-              Create and edit posts, projects, and notes on the move (via Sync/Cloud). When you get home to your laptop, connected local folders will keep your local markdown repo cleanly updated for Git commits.
-            </p>
-          </div>
+         
 
-          {/* SECTION 1: UNIFIED ROOT / CONTENT FOLDER */}
-          <div className="border border-neutral-200 dark:border-neutral-800 rounded-lg p-3.5 bg-white dark:bg-black">
-            <div className="flex items-start justify-between gap-4">
-              <div className="min-w-0">
-                <div className="flex items-center gap-2">
-                  <Folder className="w-4 h-4 text-black dark:text-white shrink-0" />
-                  <h3 className="text-xs font-semibold uppercase tracking-wider text-black dark:text-white">
-                    Blog Repository / Content Root
-                  </h3>
-                </div>
-                <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
-                  Select your blog's <code className="font-mono text-[11px] bg-neutral-100 dark:bg-neutral-900 px-1 py-0.5 rounded">content</code> or project root folder. Posts and projects will route automatically to <code className="font-mono text-[11px]">posts/</code> and <code className="font-mono text-[11px]">projects/</code>.
-                </p>
-
-                {config.rootHandle && (
-                  <div className="mt-2 flex items-center gap-2 text-xs font-mono text-emerald-600 dark:text-emerald-400">
-                    <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
-                    <span className="truncate">Connected: {config.rootName}</span>
-                  </div>
-                )}
-              </div>
-
-              <div className="flex flex-col items-end gap-1.5 shrink-0">
-                {isFsSupported && (
-                  <button
-                    type="button"
-                    onClick={handlePickRoot}
-                    disabled={isLoading}
-                    className="px-3 py-1 bg-black dark:bg-white text-white dark:text-black rounded text-xs font-medium hover:opacity-85 disabled:opacity-50 transition-opacity"
-                  >
-                    {config.rootHandle ? 'Change Root' : 'Choose Root'}
-                  </button>
-                )}
-                {config.rootHandle && (
-                  <button
-                    type="button"
-                    onClick={() => handleClearCategory('root')}
-                    className="text-[11px] text-neutral-400 hover:text-red-600 underline"
-                  >
-                    Disconnect
-                  </button>
-                )}
-              </div>
-            </div>
-          </div>
-
-          {/* SECTION 2: DEDICATED CATEGORY FOLDERS */}
+         
           <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <h3 className="text-[11px] font-semibold uppercase tracking-wider text-neutral-400 dark:text-neutral-500">
-                Category Folder Mappings
-              </h3>
-              <span className="text-[11px] text-neutral-400">
-                Overrides or specific subfolders
-              </span>
-            </div>
+            
 
             {/* Posts Folder */}
             <div className="border border-neutral-100 dark:border-neutral-900 rounded-lg p-3 bg-neutral-50/50 dark:bg-neutral-900/30 flex items-center justify-between gap-3">
               <div className="min-w-0">
                 <div className="flex items-center gap-2">
-                  <span className="text-xs font-medium text-black dark:text-white">📝 Posts Folder</span>
+                  <span className="text-xs font-medium text-black dark:text-white">Posts Folder</span>
                   <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400">
                     {postsCount} {postsCount === 1 ? 'post' : 'posts'}
                   </span>
@@ -368,7 +306,7 @@ export const LocalFolderSyncModal: React.FC<LocalFolderSyncModalProps> = ({
             <div className="border border-neutral-100 dark:border-neutral-900 rounded-lg p-3 bg-neutral-50/50 dark:bg-neutral-900/30 flex items-center justify-between gap-3">
               <div className="min-w-0">
                 <div className="flex items-center gap-2">
-                  <span className="text-xs font-medium text-black dark:text-white">🚀 Projects Folder</span>
+                  <span className="text-xs font-medium text-black dark:text-white">Projects Folder</span>
                   <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400">
                     {projectsCount} {projectsCount === 1 ? 'project' : 'projects'}
                   </span>
@@ -410,7 +348,7 @@ export const LocalFolderSyncModal: React.FC<LocalFolderSyncModalProps> = ({
             <div className="border border-neutral-100 dark:border-neutral-900 rounded-lg p-3 bg-neutral-50/50 dark:bg-neutral-900/30 flex items-center justify-between gap-3">
               <div className="min-w-0">
                 <div className="flex items-center gap-2">
-                  <span className="text-xs font-medium text-black dark:text-white">📓 Notes Folder</span>
+                  <span className="text-xs font-medium text-black dark:text-white">Notes Folder</span>
                   <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400">
                     {notesCount} {notesCount === 1 ? 'note' : 'notes'}
                   </span>
@@ -451,10 +389,7 @@ export const LocalFolderSyncModal: React.FC<LocalFolderSyncModalProps> = ({
 
           {/* SECTION 3: SYNC BEHAVIOR & ACTIONS */}
           <div className="border-t border-neutral-200 dark:border-neutral-800 pt-4 space-y-3">
-            <h3 className="text-[11px] font-semibold uppercase tracking-wider text-neutral-400 dark:text-neutral-500">
-              Sync Options & Actions
-            </h3>
-
+            
             {/* Auto-Sync Toggle */}
             <div className="flex items-center justify-between py-1">
               <div>
@@ -508,11 +443,7 @@ export const LocalFolderSyncModal: React.FC<LocalFolderSyncModalProps> = ({
 
         {/* Footer */}
         <div className="px-5 py-3 border-t border-neutral-200 dark:border-neutral-800 flex items-center justify-between bg-neutral-50/50 dark:bg-neutral-900/30 shrink-0">
-          <span className="text-[11px] text-neutral-400">
-            {localFolderManager.hasAnyFolderConfigured()
-              ? 'Local folder sync active'
-              : 'No local folder mapped'}
-          </span>
+          
           <button
             type="button"
             onClick={onClose}
