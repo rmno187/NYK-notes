@@ -14,7 +14,8 @@ import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { convertHtmlToMarkdown, parseMarkdownNote, formatBlogDate } from './lib/markdown';
 import { saveNoteToLocalFolder, openLocalMarkdownFile } from './lib/localFileOperations';
 import { isMac, modSymbol } from './lib/platform';
-import { isNoteEmpty, slugify } from './lib/noteUtils';
+import { isNoteEmpty, slugify, syncNoteImagePathsOnRename } from './lib/noteUtils';
+import { importNotesFromFiles } from './lib/importUtils';
 import { Sidebar } from './components/Sidebar';
 import { EditorPane } from './components/EditorPane';
 import { DirectorySelectorModal } from './components/DirectorySelectorModal';
@@ -1054,43 +1055,71 @@ export default function App() {
     }
   };
 
-  // Import Raw Markdown Files
+  // Import Raw Markdown Files & Attached Asset Folders / Zips
   const handleImportMarkdownFiles = async (files: FileList | File[]) => {
-    const newNotes: Note[] = [];
+    try {
+      const importedNotes = await importNotesFromFiles(files);
+      if (importedNotes.length === 0) {
+        showToast('No valid markdown documents found to import.');
+        return;
+      }
 
-    const fileArray = Array.from(files);
-    for (let i = 0; i < fileArray.length; i++) {
-      const file = fileArray[i];
-      const text = await file.text();
-      const parsed = parseMarkdownNote(text, file.name);
+      for (const note of importedNotes) {
+        await persistNote(note);
+      }
 
-      const importedNote: Note = {
-        id: `imported-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
-        title: parsed.title,
-        content: parsed.content,
-        tags: parsed.tags,
-        pinned: parsed.pinned,
-        type: parsed.type,
-        date: parsed.date,
-        description: parsed.description,
-        author: parsed.author,
-        project: parsed.project,
-        featured: parsed.featured,
-        createdAt: file.lastModified || Date.now(),
-        updatedAt: file.lastModified || Date.now(),
-        fileName: file.name,
-      };
+      setNotes((prev) => [...importedNotes, ...prev]);
+      setActiveNoteId(importedNotes[0].id);
 
-      newNotes.push(importedNote);
-      await persistNote(importedNote);
-    }
-
-    setNotes((prev) => [...newNotes, ...prev]);
-    if (newNotes.length > 0) {
-      setActiveNoteId(newNotes[0].id);
-      showToast(`Imported ${newNotes.length} note${newNotes.length === 1 ? '' : 's'}`);
+      const totalImages = importedNotes.reduce((acc, n) => acc + (n.images?.length || 0), 0);
+      if (totalImages > 0) {
+        showToast(`Imported ${importedNotes.length} note${importedNotes.length === 1 ? '' : 's'} with ${totalImages} image${totalImages === 1 ? '' : 's'}`);
+      } else {
+        showToast(`Imported ${importedNotes.length} note${importedNotes.length === 1 ? '' : 's'}`);
+      }
+    } catch (err: any) {
+      console.error('Import failed:', err);
+      showToast(`Import failed: ${err.message || 'Unknown error'}`);
     }
   };
+
+  // Rename Note File and Sync Asset Directory / Image Paths
+  const handleRenameFileName = useCallback(
+    async (newFileName: string) => {
+      if (!activeNoteId) return;
+
+      let savedNote: Note | null = null;
+
+      setNotes((prev) => {
+        const currentNote = prev.find((n) => n.id === activeNoteId);
+        if (!currentNote) return prev;
+
+        const oldFileName = currentNote.fileName;
+        const updated = syncNoteImagePathsOnRename(currentNote, newFileName);
+        savedNote = updated;
+
+        // If in filesystem mode and oldFileName exists and changed, delete old file from disk
+        if (
+          storageMode === 'filesystem' &&
+          directoryHandle &&
+          oldFileName &&
+          oldFileName !== updated.fileName
+        ) {
+          deleteNoteFromDirectory(directoryHandle, oldFileName).catch((err) =>
+            console.warn('Could not remove old file on rename:', err)
+          );
+        }
+
+        persistNote(updated);
+        return prev.map((n) => (n.id === activeNoteId ? updated : n));
+      });
+
+      if (savedNote) {
+        showToast(`Renamed to "${(savedNote as Note).fileName}"`);
+      }
+    },
+    [activeNoteId, storageMode, directoryHandle, persistNote, showToast]
+  );
 
   // Import Restored Encrypted Backup
   const handleImportRestoredNotes = async (restoredNotes: Note[]) => {
@@ -1248,6 +1277,7 @@ export default function App() {
               onToggleEditorMode={handleToggleEditorMode}
               onBackToList={handleBackToList}
               onSaveToLocalFolder={handleSaveCurrentNoteToLocalFolder}
+              onRenameFileName={handleRenameFileName}
               onOpenLocalFile={handleOpenLocalMarkdownFile}
               toastMessage={toastMessage}
               onChangeTitle={handleTitleChange}

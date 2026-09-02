@@ -56,6 +56,7 @@ export interface EditorPaneProps {
   // Local File System / Folder Ops
   onSaveToLocalFolder?: () => Promise<void> | void;
   onOpenLocalFile?: () => Promise<void> | void;
+  onRenameFileName?: (newFileName: string) => void;
   toastMessage?: string | null;
   // Blog Post & Shared Fields
   onChangeDescription?: (description: string) => void;

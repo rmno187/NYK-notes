@@ -43,16 +43,33 @@ export const ImportModal: React.FC<ImportModalProps> = ({
       const fileList = Array.from(e.target.files) as File[];
       const validFiles = fileList.filter((f: File) => {
         const name = f.name.toLowerCase();
-        return name.endsWith('.md') || name.endsWith('.markdown') || name.endsWith('.txt');
+        return (
+          name.endsWith('.md') ||
+          name.endsWith('.markdown') ||
+          name.endsWith('.txt') ||
+          name.endsWith('.zip') ||
+          name.endsWith('.png') ||
+          name.endsWith('.jpg') ||
+          name.endsWith('.jpeg') ||
+          name.endsWith('.webp') ||
+          name.endsWith('.gif') ||
+          name.endsWith('.svg')
+        );
       });
 
-      if (validFiles.length === 0) {
-        setErrorMessage('No markdown (.md) or text files found in the selection.');
+      const hasDoc = validFiles.some((f) => {
+        const n = f.name.toLowerCase();
+        return n.endsWith('.md') || n.endsWith('.markdown') || n.endsWith('.txt') || n.endsWith('.zip');
+      });
+
+      if (!hasDoc) {
+        setErrorMessage('No markdown (.md) or .zip files found in the selection.');
         return;
       }
 
       setMdFiles(validFiles);
-      setSourceName(validFiles.length === 1 ? validFiles[0].name : `${validFiles.length} markdown files`);
+      const mdCount = validFiles.filter((f) => !f.name.match(/\.(png|jpg|jpeg|webp|gif|svg)$/i)).length;
+      setSourceName(validFiles.length === 1 ? validFiles[0].name : `${mdCount} document${mdCount === 1 ? '' : 's'} + assets`);
       setErrorMessage(null);
       setMdSuccessMessage(null);
     }
@@ -61,13 +78,13 @@ export const ImportModal: React.FC<ImportModalProps> = ({
   const handleFolderSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
       const fileList = Array.from(e.target.files) as File[];
-      const validFiles = fileList.filter((f: File) => {
+      const hasDoc = fileList.some((f: File) => {
         const name = f.name.toLowerCase();
-        return name.endsWith('.md') || name.endsWith('.markdown') || name.endsWith('.txt');
+        return name.endsWith('.md') || name.endsWith('.markdown') || name.endsWith('.txt') || name.endsWith('.zip');
       });
 
-      if (validFiles.length === 0) {
-        setErrorMessage('No markdown (.md) or text files found in the selected folder.');
+      if (!hasDoc) {
+        setErrorMessage('No markdown (.md) or .zip files found in the selected folder.');
         return;
       }
 
@@ -76,8 +93,13 @@ export const ImportModal: React.FC<ImportModalProps> = ({
       const firstRelative = (firstFile as any).webkitRelativePath;
       const folderName = firstRelative ? firstRelative.split('/')[0] : 'Folder';
 
-      setMdFiles(validFiles);
-      setSourceName(`Folder: "${folderName}" (${validFiles.length} file${validFiles.length === 1 ? '' : 's'})`);
+      const mdCount = fileList.filter((f) => {
+        const n = f.name.toLowerCase();
+        return n.endsWith('.md') || n.endsWith('.markdown') || n.endsWith('.txt') || n.endsWith('.zip');
+      }).length;
+
+      setMdFiles(fileList);
+      setSourceName(`Folder: "${folderName}" (${mdCount} note${mdCount === 1 ? '' : 's'} + assets)`);
       setErrorMessage(null);
       setMdSuccessMessage(null);
     }
@@ -89,23 +111,43 @@ export const ImportModal: React.FC<ImportModalProps> = ({
         const dirHandle = await (window as any).showDirectoryPicker({ mode: 'read' });
         const collectedFiles: File[] = [];
 
-        for await (const entry of (dirHandle as any).values()) {
-          if (entry.kind === 'file') {
-            const name = entry.name.toLowerCase();
-            if (name.endsWith('.md') || name.endsWith('.markdown') || name.endsWith('.txt')) {
+        // Helper to recursively collect files with relative paths
+        const scanDir = async (handle: any, currentPath: string = '') => {
+          for await (const entry of handle.values()) {
+            if (entry.kind === 'file') {
               const file = await entry.getFile();
+              const relativePath = currentPath ? `${currentPath}/${entry.name}` : entry.name;
+              Object.defineProperty(file, 'webkitRelativePath', {
+                value: relativePath,
+                writable: false,
+              });
               collectedFiles.push(file);
+            } else if (entry.kind === 'directory') {
+              const nextPath = currentPath ? `${currentPath}/${entry.name}` : entry.name;
+              await scanDir(entry, nextPath);
             }
           }
-        }
+        };
 
-        if (collectedFiles.length === 0) {
+        await scanDir(dirHandle, dirHandle.name);
+
+        const hasDoc = collectedFiles.some((f) => {
+          const n = f.name.toLowerCase();
+          return n.endsWith('.md') || n.endsWith('.markdown') || n.endsWith('.txt') || n.endsWith('.zip');
+        });
+
+        if (!hasDoc) {
           setErrorMessage(`No markdown files found in folder "${dirHandle.name}".`);
           return;
         }
 
+        const mdCount = collectedFiles.filter((f) => {
+          const n = f.name.toLowerCase();
+          return n.endsWith('.md') || n.endsWith('.markdown') || n.endsWith('.txt') || n.endsWith('.zip');
+        }).length;
+
         setMdFiles(collectedFiles);
-        setSourceName(`Folder: "${dirHandle.name}" (${collectedFiles.length} file${collectedFiles.length === 1 ? '' : 's'})`);
+        setSourceName(`Folder: "${dirHandle.name}" (${mdCount} note${mdCount === 1 ? '' : 's'} + assets)`);
         setErrorMessage(null);
         setMdSuccessMessage(null);
       } catch (err: any) {
@@ -139,9 +181,7 @@ export const ImportModal: React.FC<ImportModalProps> = ({
               setBackupFile(file);
               return;
             }
-            if (name.endsWith('.md') || name.endsWith('.markdown') || name.endsWith('.txt')) {
-              files.push(file);
-            }
+            files.push(file);
           }
         }
       }
@@ -149,17 +189,29 @@ export const ImportModal: React.FC<ImportModalProps> = ({
       for (let i = 0; i < e.dataTransfer.files.length; i++) {
         const file = e.dataTransfer.files[i];
         const name = file.name.toLowerCase();
-        if (name.endsWith('.md') || name.endsWith('.markdown') || name.endsWith('.txt')) {
-          files.push(file);
+        if (name.endsWith('.enc') || (name.endsWith('.json') && !name.endsWith('.md.json'))) {
+          setActiveTab('backup');
+          setBackupFile(file);
+          return;
         }
+        files.push(file);
       }
     }
 
-    if (files.length > 0) {
+    const hasValid = files.some((f) => {
+      const name = f.name.toLowerCase();
+      return name.endsWith('.md') || name.endsWith('.markdown') || name.endsWith('.txt') || name.endsWith('.zip');
+    });
+
+    if (hasValid) {
       setMdFiles(files);
-      setSourceName(files.length === 1 ? files[0].name : `${files.length} markdown files dropped`);
+      const mdCount = files.filter((f) => {
+        const n = f.name.toLowerCase();
+        return n.endsWith('.md') || n.endsWith('.markdown') || n.endsWith('.txt') || n.endsWith('.zip');
+      }).length;
+      setSourceName(files.length === 1 ? files[0].name : `${mdCount} note${mdCount === 1 ? '' : 's'} + assets`);
     } else {
-      setErrorMessage('Please drop .md files or an encrypted backup file.');
+      setErrorMessage('Please drop .md files, a .zip archive, or an encrypted backup file.');
     }
   };
 

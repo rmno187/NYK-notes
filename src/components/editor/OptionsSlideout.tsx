@@ -1,7 +1,7 @@
 import React, { useRef, useState, useEffect } from 'react';
 import { X, Check } from 'lucide-react';
 import { Note, EditorMode, StorageMode, Theme, NoteType } from '../../types';
-import { slugify } from '../../lib/noteUtils';
+import { slugify, getNoteBaseName } from '../../lib/noteUtils';
 
 interface OptionsSlideoutProps {
   isOpen: boolean;
@@ -26,6 +26,7 @@ interface OptionsSlideoutProps {
   onDeleteNote?: () => void;
   onRestoreNote?: () => void;
   onSaveToLocalFolder?: () => Promise<void> | void;
+  onRenameFileName?: (newFileName: string) => void;
   mode: EditorMode;
   onSetMode: (mode: EditorMode) => void;
   theme?: Theme;
@@ -63,6 +64,7 @@ export const OptionsSlideout: React.FC<OptionsSlideoutProps> = ({
   onDeleteNote,
   onRestoreNote,
   onSaveToLocalFolder,
+  onRenameFileName,
   mode,
   onSetMode,
   theme,
@@ -74,6 +76,11 @@ export const OptionsSlideout: React.FC<OptionsSlideoutProps> = ({
   onOpenImportModal,
   onOpenShortcutsModal,
 }) => {
+  // Filename State
+  const [isEditingFileName, setIsEditingFileName] = useState(false);
+  const [fileNameInput, setFileNameInput] = useState('');
+  const fileNameInputRef = useRef<HTMLInputElement>(null);
+
   // Tags State
   const [isAddingTag, setIsAddingTag] = useState(false);
   const [tagInput, setTagInput] = useState('');
@@ -151,7 +158,14 @@ export const OptionsSlideout: React.FC<OptionsSlideoutProps> = ({
 
     setIsEditingOrder(false);
     setOrderInput('');
+
+    setIsEditingFileName(false);
+    setFileNameInput('');
   }, [note.id]);
+
+  useEffect(() => {
+    if (isEditingFileName && fileNameInputRef.current) fileNameInputRef.current.focus();
+  }, [isEditingFileName]);
 
   useEffect(() => {
     if (isAddingTag && tagInputRef.current) tagInputRef.current.focus();
@@ -307,6 +321,21 @@ export const OptionsSlideout: React.FC<OptionsSlideoutProps> = ({
     setIsEditingOrder(false);
     setOrderInput('');
   };
+
+  const handleSaveFileName = () => {
+    let clean = fileNameInput.trim();
+    if (clean) {
+      if (!clean.endsWith('.md')) {
+        clean = `${clean.replace(/\.(markdown|txt)$/i, '')}.md`;
+      }
+      onRenameFileName?.(clean);
+    }
+    setIsEditingFileName(false);
+    setFileNameInput('');
+  };
+
+  const currentBaseName = getNoteBaseName(note);
+  const currentFileName = note.fileName || `${currentBaseName}.md`;
 
   const noteTypeLabel =
     note.type === 'project' ? 'Project' : note.type === 'post' ? 'Blog post' : 'Note';
@@ -1127,6 +1156,83 @@ export const OptionsSlideout: React.FC<OptionsSlideoutProps> = ({
             </div>
 
             <div className="space-y-2 text-xs">
+              {/* File Name with rename support */}
+              <div className="flex items-center justify-between gap-2 min-h-[26px]">
+                <span className="text-neutral-500 dark:text-neutral-500 shrink-0">File</span>
+                {!isEditingFileName ? (
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <span className="text-black dark:text-white font-mono text-[11px] truncate max-w-[190px]" title={currentFileName}>
+                      {currentFileName}
+                    </span>
+                    {onRenameFileName && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setFileNameInput(currentFileName);
+                          setIsEditingFileName(true);
+                        }}
+                        className="text-[10px] text-neutral-400 hover:text-black dark:hover:text-white underline underline-offset-2 shrink-0"
+                        title="Rename file and sync assets"
+                      >
+                        Rename
+                      </button>
+                    )}
+                  </div>
+                ) : (
+                  <div className="relative flex items-center">
+                    <input
+                      ref={fileNameInputRef}
+                      type="text"
+                      placeholder="filename.md"
+                      value={fileNameInput}
+                      onChange={(e) => setFileNameInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          handleSaveFileName();
+                        } else if (e.key === 'Escape') {
+                          setIsEditingFileName(false);
+                          setFileNameInput('');
+                        }
+                      }}
+                      className="font-mono bg-transparent border-b border-black dark:border-white py-0.5 pr-10 text-[11px] text-black dark:text-white placeholder-neutral-400 dark:placeholder-neutral-600 focus:outline-none w-44 text-right transition-colors"
+                    />
+                    <div className="absolute right-0 top-1/2 -translate-y-1/2 flex items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={handleSaveFileName}
+                        className="text-neutral-600 hover:text-black dark:text-neutral-300 dark:hover:text-white"
+                        title="Save rename"
+                      >
+                        <Check className="w-3 h-3" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsEditingFileName(false);
+                          setFileNameInput('');
+                        }}
+                        className="text-neutral-400 hover:text-black dark:hover:text-white"
+                        title="Cancel"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Asset Directory */}
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-neutral-500 dark:text-neutral-500 shrink-0">Asset folder</span>
+                <span className="text-neutral-700 dark:text-neutral-300 font-mono text-[11px] truncate max-w-[200px]" title={`./${currentBaseName}/`}>
+                  ./{currentBaseName}/
+                  {note.images && note.images.length > 0 && (
+                    <span className="ml-1 text-[10px] text-neutral-400">({note.images.length} img{note.images.length === 1 ? '' : 's'})</span>
+                  )}
+                </span>
+              </div>
+
               {note.type === 'post' && (
                 <div className="flex justify-between gap-4">
                   <span className="text-neutral-500 dark:text-neutral-500">Date</span>

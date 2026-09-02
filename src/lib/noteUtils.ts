@@ -17,12 +17,13 @@ export function slugify(text: string): string {
 
 /**
  * Computes the canonical base name (without .md extension) for a note or post.
- * Format: YYYY-MM-DD-title or preserves existing note.fileName base name if opened from disk.
- * e.g. "2026-02-01-my-post"
+ * Format: Post's fileName (without .md) as the source of truth, or YYYY-MM-DD-title if not set.
+ * e.g. "2026.02.01-my-amazing-project" or "2026-02-01-my-post"
  */
 export function getNoteBaseName(note: Partial<Note>, fallbackTimestamp?: number): string {
   if (note.fileName) {
-    const withoutExt = note.fileName.replace(/\.(md|markdown|txt)$/i, '');
+    const cleanFileName = note.fileName.split('/').pop()?.split('\\').pop() || note.fileName;
+    const withoutExt = cleanFileName.replace(/\.(md|markdown|txt)$/i, '');
     if (withoutExt) return withoutExt;
   }
 
@@ -61,6 +62,52 @@ export function getNoteBaseName(note: Partial<Note>, fallbackTimestamp?: number)
     return `${dateStamp}-${rawTitle}`;
   }
   return dateStamp;
+}
+
+/**
+ * Renames a note's filename and synchronizes all attached images' relative paths
+ * and any image references inside the note content.
+ */
+export function syncNoteImagePathsOnRename(note: Note, newFileName: string): Note {
+  const cleanNewFileName = newFileName.trim().endsWith('.md')
+    ? newFileName.trim()
+    : `${newFileName.trim().replace(/\.(markdown|txt)$/i, '')}.md`;
+
+  const oldBaseName = getNoteBaseName(note);
+  const newBaseName = getNoteBaseName({ ...note, fileName: cleanNewFileName });
+
+  let updatedContent = note.content;
+  let updatedImages = note.images ? [...note.images] : [];
+
+  if (oldBaseName && newBaseName && oldBaseName !== newBaseName) {
+    // 1. Update attached images relative paths
+    updatedImages = updatedImages.map((img) => {
+      const oldPath = img.relativePath || `./${img.name}`;
+      const imgFileName = img.name || oldPath.split('/').pop() || 'image.png';
+
+      let newRelativePath = `./${newBaseName}/${imgFileName}`;
+      if (oldPath.includes(oldBaseName)) {
+        newRelativePath = oldPath.replace(oldBaseName, newBaseName);
+      }
+      return {
+        ...img,
+        relativePath: newRelativePath,
+      };
+    });
+
+    // 2. Replace references in markdown content
+    const escapedOld = oldBaseName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const regexWithDot = new RegExp(`(\\./)?${escapedOld}/`, 'g');
+    updatedContent = updatedContent.replace(regexWithDot, `./${newBaseName}/`);
+  }
+
+  return {
+    ...note,
+    fileName: cleanNewFileName,
+    images: updatedImages,
+    content: updatedContent,
+    updatedAt: Date.now(),
+  };
 }
 
 /**

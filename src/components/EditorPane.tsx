@@ -28,6 +28,7 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
   onToggleEditorMode,
   onBackToList,
   onSaveToLocalFolder,
+  onRenameFileName,
   toastMessage,
   onChangeDescription,
   onChangeAuthor,
@@ -530,8 +531,6 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
     }
   }, [note.id, note.title, note.content, focusContent]);
 
-  const imagesCount = note.images?.length || 0;
-
   return (
     <div
       onDragOver={handleEditorDragOver}
@@ -575,17 +574,6 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
           </div>
 
           <div className="flex items-center space-x-1.5 shrink-0">
-            {/* Quick Media / Image Button */}
-            <button
-              type="button"
-              onClick={() => setIsImageModalOpen(true)}
-              title={imagesCount > 0 ? `${imagesCount} image${imagesCount > 1 ? 's' : ''} attached (Click to manage)` : 'Add Image'}
-              className="flex items-center space-x-1 px-2.5 py-1 text-xs font-medium rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors"
-            >
-              <ImageIcon className="w-3.5 h-3.5 text-blue-500" />
-              <span>{imagesCount > 0 ? `${imagesCount} img` : 'Image'}</span>
-            </button>
-
             <button
               type="button"
               onClick={() => setIsSlideoutOpen(true)}
@@ -732,6 +720,7 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
         onDeleteNote={onDeleteNote}
         onRestoreNote={onRestoreNote}
         onSaveToLocalFolder={onSaveToLocalFolder}
+        onRenameFileName={onRenameFileName}
         mode={mode}
         onSetMode={setMode}
         theme={theme}

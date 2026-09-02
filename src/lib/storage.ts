@@ -1,5 +1,8 @@
-import { Note, StorageMode } from '../types';
+import { Note, NoteImage, StorageMode } from '../types';
 import { parseMarkdownNote, serializeNoteToMarkdown } from './markdown';
+import { getNoteBaseName } from './noteUtils';
+import { readFileAsDataUrl } from './imageUtils';
+import { saveImagesToDirectoryHandle } from './localFileOperations';
 
 const DB_NAME = 'OfflineNotesDB';
 const DB_VERSION = 1;
@@ -146,7 +149,7 @@ export async function selectLocalDirectory(): Promise<FileSystemDirectoryHandle>
 }
 
 /**
- * Load all .md files from selected local directory
+ * Load all .md files and their corresponding asset folders from selected local directory
  */
 export async function loadNotesFromDirectory(dirHandle: FileSystemDirectoryHandle): Promise<Note[]> {
   const notes: Note[] = [];
@@ -159,31 +162,81 @@ export async function loadNotesFromDirectory(dirHandle: FileSystemDirectoryHandl
     }
   }
 
+  // Collect markdown files and subdirectories
+  const mdEntries: { name: string; handle: any }[] = [];
+  const dirEntries = new Map<string, any>();
+
   for await (const entry of (dirHandle as any).values()) {
     if (entry.kind === 'file' && (entry.name.endsWith('.md') || entry.name.endsWith('.markdown'))) {
-      try {
-        const file = await entry.getFile();
-        const rawContent = await file.text();
-        const parsed = parseMarkdownNote(rawContent, entry.name);
+      mdEntries.push({ name: entry.name, handle: entry });
+    } else if (entry.kind === 'directory') {
+      dirEntries.set(entry.name, entry);
+    }
+  }
 
-        notes.push({
-          id: entry.name,
-          title: parsed.title,
-          content: parsed.content,
-          tags: parsed.tags,
-          pinned: parsed.pinned,
-          createdAt: file.lastModified,
-          updatedAt: file.lastModified,
-          fileName: entry.name,
-          type: parsed.type,
-          date: parsed.date,
-          description: parsed.description,
-          author: parsed.author,
-          featured: parsed.featured,
-        });
-      } catch (e) {
-        console.error(`Error reading file ${entry.name}:`, e);
+  for (const { name: fileName, handle: mdHandle } of mdEntries) {
+    try {
+      const file = await mdHandle.getFile();
+      const rawContent = await file.text();
+      const parsed = parseMarkdownNote(rawContent, fileName);
+
+      // Derive base name from current fileName as the source of truth
+      const baseName = getNoteBaseName({
+        fileName,
+        title: parsed.title,
+        date: parsed.date,
+        createdAt: file.lastModified,
+      });
+
+      const attachedImages: NoteImage[] = [];
+
+      // Look for asset folder matching this post's baseName
+      if (dirEntries.has(baseName)) {
+        const subDirHandle = dirEntries.get(baseName);
+        for await (const subEntry of subDirHandle.values()) {
+          if (subEntry.kind === 'file') {
+            const ext = subEntry.name.split('.').pop()?.toLowerCase() || '';
+            if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'avif', 'bmp'].includes(ext)) {
+              try {
+                const imgFile = await subEntry.getFile();
+                const dataUrl = await readFileAsDataUrl(imgFile);
+                attachedImages.push({
+                  id: `img-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
+                  name: subEntry.name,
+                  dataUrl,
+                  relativePath: `./${baseName}/${subEntry.name}`,
+                  alt: subEntry.name.replace(/\.[^/.]+$/, '').replace(/[-_]+/g, ' '),
+                  size: imgFile.size,
+                  mimeType: imgFile.type,
+                  createdAt: imgFile.lastModified || Date.now(),
+                });
+              } catch (e) {
+                console.warn(`Failed to read image ${subEntry.name}:`, e);
+              }
+            }
+          }
+        }
       }
+
+      notes.push({
+        id: fileName,
+        title: parsed.title,
+        content: parsed.content,
+        tags: parsed.tags,
+        pinned: parsed.pinned,
+        createdAt: file.lastModified,
+        updatedAt: file.lastModified,
+        fileName: fileName,
+        type: parsed.type,
+        date: parsed.date,
+        description: parsed.description,
+        author: parsed.author,
+        project: parsed.project,
+        featured: parsed.featured,
+        images: attachedImages.length > 0 ? attachedImages : undefined,
+      });
+    } catch (e) {
+      console.error(`Error reading file ${fileName}:`, e);
     }
   }
 
@@ -191,7 +244,7 @@ export async function loadNotesFromDirectory(dirHandle: FileSystemDirectoryHandl
 }
 
 /**
- * Save note to disk file inside selected local directory
+ * Save note to disk file inside selected local directory and save any attached images into its asset folder
  */
 export async function saveNoteToDirectory(dirHandle: FileSystemDirectoryHandle, note: Note): Promise<string> {
   const options = { mode: 'readwrite' };
@@ -212,6 +265,11 @@ export async function saveNoteToDirectory(dirHandle: FileSystemDirectoryHandle, 
   const writable = await fileHandle.createWritable();
   await writable.write(serializedContent);
   await writable.close();
+
+  // Save attached images to asset directory
+  if (note.images && note.images.length > 0) {
+    await saveImagesToDirectoryHandle(dirHandle, note.images);
+  }
 
   return fileName;
 }
