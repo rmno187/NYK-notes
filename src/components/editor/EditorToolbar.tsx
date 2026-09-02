@@ -34,23 +34,7 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
   onFormat,
   onUndo,
   onRedo,
-  keyboardOffset = 0,
-  isKeyboardOpen = false,
 }) => {
-  // Compute dynamic bottom positioning on mobile so toolbar sticks precisely to keyboard
-  const getMobileToolbarStyle = (): React.CSSProperties => {
-    // If keyboard is active or offset detected on mobile
-    if (keyboardOffset > 0 || isKeyboardOpen) {
-      return {
-        bottom: `${keyboardOffset + 8}px`,
-      };
-    }
-
-    return {
-      bottom: 'max(0.75rem, env(safe-area-inset-bottom))',
-    };
-  };
-
   // Prevent blur on touch / mouse down to keep keyboard open during formatting
   const handleActionStart = (e: React.MouseEvent | React.TouchEvent) => {
     e.preventDefault();
@@ -60,12 +44,11 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
     <div
       onMouseDown={handleActionStart}
       onTouchStart={handleActionStart}
-      className={`fixed left-0 right-0 z-30 flex justify-center px-3 sm:px-4 w-full md:static md:pointer-events-auto md:w-auto md:px-5 md:py-1.5 md:border-b md:border-neutral-200 md:dark:border-neutral-800 md:bg-transparent select-none order-2 md:order-1 transition-[bottom] duration-100 ease-out pointer-events-none`}
-      style={getMobileToolbarStyle()}
+      className="shrink-0 w-full border-t border-neutral-200 dark:border-neutral-800 bg-neutral-50/95 dark:bg-neutral-950/95 backdrop-blur-xs px-3 py-1.5 z-20 flex justify-center items-center select-none"
     >
-      <div className="pointer-events-auto flex items-center gap-1 overflow-x-auto scrollbar-none px-2.5 py-1 bg-neutral-900/95 dark:bg-neutral-900/95 md:bg-transparent text-neutral-100 md:text-inherit rounded-full md:rounded-none shadow-2xl md:shadow-none border border-neutral-700/70 dark:border-neutral-700/70 md:border-none backdrop-blur-md max-w-full">
+      <div className="flex items-center gap-1 overflow-x-auto scrollbar-none px-1 py-0.5 max-w-full">
         {hasTextSelection ? (
-          /* Selection Toolbar: B, I, U, link, H1, H2, code block, quote */
+          /* Selection Toolbar: B, I, U, link, image, H1, H2, code block, quote */
           <>
             <button
               type="button"
@@ -73,10 +56,10 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
               onTouchStart={handleActionStart}
               onClick={() => onFormat('bold')}
               title={`Bold (${modSymbol}B)`}
-              className={`p-1.5 rounded-full md:rounded-md transition-colors shrink-0 ${
+              className={`p-1.5 rounded-md transition-colors shrink-0 ${
                 activeFormats.bold
-                  ? 'bg-blue-600 text-white md:bg-neutral-200 md:dark:bg-neutral-800 md:text-blue-600 md:dark:text-blue-400 font-bold'
-                  : 'text-neutral-300 md:text-neutral-600 md:dark:text-neutral-400 hover:text-white md:hover:text-neutral-900 md:dark:hover:text-neutral-100 hover:bg-neutral-800/80 md:hover:bg-neutral-100 md:dark:hover:bg-neutral-800/60'
+                  ? 'bg-neutral-200 dark:bg-neutral-800 text-blue-600 dark:text-blue-400 font-bold'
+                  : 'text-neutral-600 dark:text-neutral-400 hover:text-black dark:hover:text-white hover:bg-neutral-200/70 dark:hover:bg-neutral-800/70'
               }`}
             >
               <Bold className="w-4 h-4" />
@@ -88,10 +71,10 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
               onTouchStart={handleActionStart}
               onClick={() => onFormat('italic')}
               title={`Italic (${modSymbol}I)`}
-              className={`p-1.5 rounded-full md:rounded-md transition-colors shrink-0 ${
+              className={`p-1.5 rounded-md transition-colors shrink-0 ${
                 activeFormats.italic
-                  ? 'bg-blue-600 text-white md:bg-neutral-200 md:dark:bg-neutral-800 md:text-blue-600 md:dark:text-blue-400 font-bold'
-                  : 'text-neutral-300 md:text-neutral-600 md:dark:text-neutral-400 hover:text-white md:hover:text-neutral-900 md:dark:hover:text-neutral-100 hover:bg-neutral-800/80 md:hover:bg-neutral-100 md:dark:hover:bg-neutral-800/60'
+                  ? 'bg-neutral-200 dark:bg-neutral-800 text-blue-600 dark:text-blue-400 font-bold'
+                  : 'text-neutral-600 dark:text-neutral-400 hover:text-black dark:hover:text-white hover:bg-neutral-200/70 dark:hover:bg-neutral-800/70'
               }`}
             >
               <Italic className="w-4 h-4" />
@@ -103,10 +86,10 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
               onTouchStart={handleActionStart}
               onClick={() => onFormat('underline')}
               title="Underline"
-              className={`p-1.5 rounded-full md:rounded-md transition-colors shrink-0 ${
+              className={`p-1.5 rounded-md transition-colors shrink-0 ${
                 activeFormats.underline
-                  ? 'bg-blue-600 text-white md:bg-neutral-200 md:dark:bg-neutral-800 md:text-blue-600 md:dark:text-blue-400 font-bold'
-                  : 'text-neutral-300 md:text-neutral-600 md:dark:text-neutral-400 hover:text-white md:hover:text-neutral-900 md:dark:hover:text-neutral-100 hover:bg-neutral-800/80 md:hover:bg-neutral-100 md:dark:hover:bg-neutral-800/60'
+                  ? 'bg-neutral-200 dark:bg-neutral-800 text-blue-600 dark:text-blue-400 font-bold'
+                  : 'text-neutral-600 dark:text-neutral-400 hover:text-black dark:hover:text-white hover:bg-neutral-200/70 dark:hover:bg-neutral-800/70'
               }`}
             >
               <Underline className="w-4 h-4" />
@@ -118,10 +101,10 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
               onTouchStart={handleActionStart}
               onClick={() => onFormat('link')}
               title="Insert Link"
-              className={`p-1.5 rounded-full md:rounded-md transition-colors shrink-0 ${
+              className={`p-1.5 rounded-md transition-colors shrink-0 ${
                 activeFormats.link
-                  ? 'bg-blue-600 text-white md:bg-neutral-200 md:dark:bg-neutral-800 md:text-blue-600 md:dark:text-blue-400 font-bold'
-                  : 'text-neutral-300 md:text-neutral-600 md:dark:text-neutral-400 hover:text-white md:hover:text-neutral-900 md:dark:hover:text-neutral-100 hover:bg-neutral-800/80 md:hover:bg-neutral-100 md:dark:hover:bg-neutral-800/60'
+                  ? 'bg-neutral-200 dark:bg-neutral-800 text-blue-600 dark:text-blue-400 font-bold'
+                  : 'text-neutral-600 dark:text-neutral-400 hover:text-black dark:hover:text-white hover:bg-neutral-200/70 dark:hover:bg-neutral-800/70'
               }`}
             >
               <LinkIcon className="w-4 h-4" />
@@ -133,16 +116,16 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
               onTouchStart={handleActionStart}
               onClick={() => onFormat('image')}
               title="Insert Image"
-              className={`p-1.5 rounded-full md:rounded-md transition-colors shrink-0 ${
+              className={`p-1.5 rounded-md transition-colors shrink-0 ${
                 activeFormats.image
-                  ? 'bg-blue-600 text-white md:bg-neutral-200 md:dark:bg-neutral-800 md:text-blue-600 md:dark:text-blue-400 font-bold'
-                  : 'text-neutral-300 md:text-neutral-600 md:dark:text-neutral-400 hover:text-white md:hover:text-neutral-900 md:dark:hover:text-neutral-100 hover:bg-neutral-800/80 md:hover:bg-neutral-100 md:dark:hover:bg-neutral-800/60'
+                  ? 'bg-neutral-200 dark:bg-neutral-800 text-blue-600 dark:text-blue-400 font-bold'
+                  : 'text-neutral-600 dark:text-neutral-400 hover:text-black dark:hover:text-white hover:bg-neutral-200/70 dark:hover:bg-neutral-800/70'
               }`}
             >
               <ImageIcon className="w-4 h-4" />
             </button>
 
-            <div className="w-px h-4 bg-neutral-700/60 md:bg-neutral-200 md:dark:bg-neutral-800 mx-1 shrink-0" />
+            <div className="w-px h-4 bg-neutral-200 dark:bg-neutral-800 mx-1 shrink-0" />
 
             <button
               type="button"
@@ -150,10 +133,10 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
               onTouchStart={handleActionStart}
               onClick={() => onFormat('heading')}
               title="Heading 1"
-              className={`p-1.5 rounded-full md:rounded-md transition-colors shrink-0 ${
+              className={`p-1.5 rounded-md transition-colors shrink-0 ${
                 activeFormats.heading
-                  ? 'bg-blue-600 text-white md:bg-neutral-200 md:dark:bg-neutral-800 md:text-blue-600 md:dark:text-blue-400 font-bold'
-                  : 'text-neutral-300 md:text-neutral-600 md:dark:text-neutral-400 hover:text-white md:hover:text-neutral-900 md:dark:hover:text-neutral-100 hover:bg-neutral-800/80 md:hover:bg-neutral-100 md:dark:hover:bg-neutral-800/60'
+                  ? 'bg-neutral-200 dark:bg-neutral-800 text-blue-600 dark:text-blue-400 font-bold'
+                  : 'text-neutral-600 dark:text-neutral-400 hover:text-black dark:hover:text-white hover:bg-neutral-200/70 dark:hover:bg-neutral-800/70'
               }`}
             >
               <Heading1 className="w-4 h-4" />
@@ -165,10 +148,10 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
               onTouchStart={handleActionStart}
               onClick={() => onFormat('h2')}
               title="Heading 2"
-              className={`p-1.5 rounded-full md:rounded-md transition-colors shrink-0 ${
+              className={`p-1.5 rounded-md transition-colors shrink-0 ${
                 activeFormats.h2
-                  ? 'bg-blue-600 text-white md:bg-neutral-200 md:dark:bg-neutral-800 md:text-blue-600 md:dark:text-blue-400 font-bold'
-                  : 'text-neutral-300 md:text-neutral-600 md:dark:text-neutral-400 hover:text-white md:hover:text-neutral-900 md:dark:hover:text-neutral-100 hover:bg-neutral-800/80 md:hover:bg-neutral-100 md:dark:hover:bg-neutral-800/60'
+                  ? 'bg-neutral-200 dark:bg-neutral-800 text-blue-600 dark:text-blue-400 font-bold'
+                  : 'text-neutral-600 dark:text-neutral-400 hover:text-black dark:hover:text-white hover:bg-neutral-200/70 dark:hover:bg-neutral-800/70'
               }`}
             >
               <Heading2 className="w-4 h-4" />
@@ -180,10 +163,10 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
               onTouchStart={handleActionStart}
               onClick={() => onFormat('code')}
               title="Code Block"
-              className={`p-1.5 rounded-full md:rounded-md transition-colors shrink-0 ${
+              className={`p-1.5 rounded-md transition-colors shrink-0 ${
                 activeFormats.code
-                  ? 'bg-blue-600 text-white md:bg-neutral-200 md:dark:bg-neutral-800 md:text-blue-600 md:dark:text-blue-400 font-bold'
-                  : 'text-neutral-300 md:text-neutral-600 md:dark:text-neutral-400 hover:text-white md:hover:text-neutral-900 md:dark:hover:text-neutral-100 hover:bg-neutral-800/80 md:hover:bg-neutral-100 md:dark:hover:bg-neutral-800/60'
+                  ? 'bg-neutral-200 dark:bg-neutral-800 text-blue-600 dark:text-blue-400 font-bold'
+                  : 'text-neutral-600 dark:text-neutral-400 hover:text-black dark:hover:text-white hover:bg-neutral-200/70 dark:hover:bg-neutral-800/70'
               }`}
             >
               <Code className="w-4 h-4" />
@@ -195,17 +178,17 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
               onTouchStart={handleActionStart}
               onClick={() => onFormat('quote')}
               title="Quote"
-              className={`p-1.5 rounded-full md:rounded-md transition-colors shrink-0 ${
+              className={`p-1.5 rounded-md transition-colors shrink-0 ${
                 activeFormats.quote
-                  ? 'bg-blue-600 text-white md:bg-neutral-200 md:dark:bg-neutral-800 md:text-blue-600 md:dark:text-blue-400 font-bold'
-                  : 'text-neutral-300 md:text-neutral-600 md:dark:text-neutral-400 hover:text-white md:hover:text-neutral-900 md:dark:hover:text-neutral-100 hover:bg-neutral-800/80 md:hover:bg-neutral-100 md:dark:hover:bg-neutral-800/60'
+                  ? 'bg-neutral-200 dark:bg-neutral-800 text-blue-600 dark:text-blue-400 font-bold'
+                  : 'text-neutral-600 dark:text-neutral-400 hover:text-black dark:hover:text-white hover:bg-neutral-200/70 dark:hover:bg-neutral-800/70'
               }`}
             >
               <Quote className="w-4 h-4" />
             </button>
           </>
         ) : (
-          /* Default Minimalist Toolbar: undo, redo | checkbox, table, line */
+          /* Default Minimalist Toolbar: undo, redo | checkbox, image, table, line */
           <>
             <button
               type="button"
@@ -213,7 +196,7 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
               onTouchStart={handleActionStart}
               onClick={onUndo}
               title={`Undo (${modSymbol}Z)`}
-              className="p-1.5 rounded-full md:rounded-md transition-colors text-neutral-300 md:text-neutral-600 md:dark:text-neutral-400 hover:text-white md:hover:text-neutral-900 md:dark:hover:text-neutral-100 hover:bg-neutral-800/80 md:hover:bg-neutral-100 md:dark:hover:bg-neutral-800/60 shrink-0"
+              className="p-1.5 rounded-md transition-colors text-neutral-600 dark:text-neutral-400 hover:text-black dark:hover:text-white hover:bg-neutral-200/70 dark:hover:bg-neutral-800/70 shrink-0"
             >
               <Undo className="w-4 h-4" />
             </button>
@@ -224,12 +207,12 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
               onTouchStart={handleActionStart}
               onClick={onRedo}
               title={`Redo (${modSymbol}Y)`}
-              className="p-1.5 rounded-full md:rounded-md transition-colors text-neutral-300 md:text-neutral-600 md:dark:text-neutral-400 hover:text-white md:hover:text-neutral-900 md:dark:hover:text-neutral-100 hover:bg-neutral-800/80 md:hover:bg-neutral-100 md:dark:hover:bg-neutral-800/60 shrink-0"
+              className="p-1.5 rounded-md transition-colors text-neutral-600 dark:text-neutral-400 hover:text-black dark:hover:text-white hover:bg-neutral-200/70 dark:hover:bg-neutral-800/70 shrink-0"
             >
               <Redo className="w-4 h-4" />
             </button>
 
-            <div className="w-px h-4 bg-neutral-700/60 md:bg-neutral-200 md:dark:bg-neutral-800 mx-1 shrink-0" />
+            <div className="w-px h-4 bg-neutral-200 dark:bg-neutral-800 mx-1 shrink-0" />
 
             <button
               type="button"
@@ -237,10 +220,10 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
               onTouchStart={handleActionStart}
               onClick={() => onFormat('task')}
               title="Checkbox / Task List"
-              className={`p-1.5 rounded-full md:rounded-md transition-colors shrink-0 ${
+              className={`p-1.5 rounded-md transition-colors shrink-0 ${
                 activeFormats.task
-                  ? 'bg-blue-600 text-white md:bg-neutral-200 md:dark:bg-neutral-800 md:text-blue-600 md:dark:text-blue-400 font-bold'
-                  : 'text-neutral-300 md:text-neutral-600 md:dark:text-neutral-400 hover:text-white md:hover:text-neutral-900 md:dark:hover:text-neutral-100 hover:bg-neutral-800/80 md:hover:bg-neutral-100 md:dark:hover:bg-neutral-800/60'
+                  ? 'bg-neutral-200 dark:bg-neutral-800 text-blue-600 dark:text-blue-400 font-bold'
+                  : 'text-neutral-600 dark:text-neutral-400 hover:text-black dark:hover:text-white hover:bg-neutral-200/70 dark:hover:bg-neutral-800/70'
               }`}
             >
               <CheckSquare className="w-4 h-4" />
@@ -252,7 +235,7 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
               onTouchStart={handleActionStart}
               onClick={() => onFormat('image')}
               title="Insert Image"
-              className="p-1.5 rounded-full md:rounded-md transition-colors text-neutral-300 md:text-neutral-600 md:dark:text-neutral-400 hover:text-white md:hover:text-neutral-900 md:dark:hover:text-neutral-100 hover:bg-neutral-800/80 md:hover:bg-neutral-100 md:dark:hover:bg-neutral-800/60 shrink-0"
+              className="p-1.5 rounded-md transition-colors text-neutral-600 dark:text-neutral-400 hover:text-black dark:hover:text-white hover:bg-neutral-200/70 dark:hover:bg-neutral-800/70 shrink-0"
             >
               <ImageIcon className="w-4 h-4" />
             </button>
@@ -263,7 +246,7 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
               onTouchStart={handleActionStart}
               onClick={() => onFormat('table')}
               title="Insert Table"
-              className="p-1.5 rounded-full md:rounded-md transition-colors text-neutral-300 md:text-neutral-600 md:dark:text-neutral-400 hover:text-white md:hover:text-neutral-900 md:dark:hover:text-neutral-100 hover:bg-neutral-800/80 md:hover:bg-neutral-100 md:dark:hover:bg-neutral-800/60 shrink-0"
+              className="p-1.5 rounded-md transition-colors text-neutral-600 dark:text-neutral-400 hover:text-black dark:hover:text-white hover:bg-neutral-200/70 dark:hover:bg-neutral-800/70 shrink-0"
             >
               <Table className="w-4 h-4" />
             </button>
@@ -274,7 +257,7 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
               onTouchStart={handleActionStart}
               onClick={() => onFormat('hr')}
               title="Horizontal Line"
-              className="p-1.5 rounded-full md:rounded-md transition-colors text-neutral-300 md:text-neutral-600 md:dark:text-neutral-400 hover:text-white md:hover:text-neutral-900 md:dark:hover:text-neutral-100 hover:bg-neutral-800/80 md:hover:bg-neutral-100 md:dark:hover:bg-neutral-800/60 shrink-0"
+              className="p-1.5 rounded-md transition-colors text-neutral-600 dark:text-neutral-400 hover:text-black dark:hover:text-white hover:bg-neutral-200/70 dark:hover:bg-neutral-800/70 shrink-0"
             >
               <Minus className="w-4 h-4" />
             </button>

@@ -275,8 +275,8 @@ export function parseMarkdownNote(rawContent: string, defaultFileName?: string) 
     }
   }
 
-  // Clean leading blank lines that were after frontmatter
-  content = content.replace(/^\r?\n+/, '');
+  // Consume at most the single newline following the frontmatter delimiter
+  content = content.replace(/^\r?\n/, '');
 
   // 3. Fallback title extraction if no explicit title was found in frontmatter/metadata:
   if (!hasExplicitTitle) {
