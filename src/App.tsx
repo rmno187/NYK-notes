@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Note, StorageMode, Theme, EditorMode, NoteType, NoteImage, ImageFolderStrategy } from './types';
 import {
   getIndexedDBNotes,
@@ -299,6 +299,62 @@ export default function App() {
     return notes.find((n) => n.id === activeNoteId) || null;
   }, [notes, activeNoteId]);
 
+  // Keep track of pending local folder sync timers per note ID
+  const localFolderSyncTimers = useRef<Map<string, NodeJS.Timeout>>(new Map());
+  const pendingSyncNotes = useRef<Map<string, { note: Note; previousFileName?: string }>>(new Map());
+
+  // Cancel any pending sync for a note
+  const cancelPendingLocalSync = useCallback((noteId: string) => {
+    const timer = localFolderSyncTimers.current.get(noteId);
+    if (timer) {
+      clearTimeout(timer);
+      localFolderSyncTimers.current.delete(noteId);
+    }
+    pendingSyncNotes.current.delete(noteId);
+  }, []);
+
+  // Flush pending sync for a note or all notes immediately
+  const flushPendingLocalSync = useCallback(async (noteId?: string) => {
+    const targetIds = noteId ? [noteId] : Array.from(pendingSyncNotes.current.keys());
+    for (const id of targetIds) {
+      const timer = localFolderSyncTimers.current.get(id);
+      if (timer) {
+        clearTimeout(timer);
+        localFolderSyncTimers.current.delete(id);
+      }
+      const pending = pendingSyncNotes.current.get(id);
+      pendingSyncNotes.current.delete(id);
+      if (pending && !isNoteEmpty(pending.note) && !pending.note.deletedAt) {
+        try {
+          const res = await localFolderManager.saveNoteToLocalFolder(pending.note, pending.previousFileName);
+          if (res) {
+            setNotes((prev) =>
+              prev.map((n) =>
+                n.id === pending.note.id
+                  ? {
+                      ...n,
+                      localBackedUp: true,
+                      localFolderName: res.folderName,
+                      fileName: res.fileName,
+                    }
+                  : n
+              )
+            );
+          }
+        } catch (err) {
+          console.warn('Auto local folder sync error on flush:', err);
+        }
+      }
+    }
+  }, []);
+
+  // Flush on unmount
+  useEffect(() => {
+    return () => {
+      flushPendingLocalSync();
+    };
+  }, [flushPendingLocalSync]);
+
   // Handle Note Save to Active Storage Provider
   const persistNote = useCallback(
     async (updatedNote: Note, previousFileName?: string) => {
@@ -318,35 +374,62 @@ export default function App() {
         }
 
         // Auto sync to configured local folders (posts / projects / notes)
-        if (
-          !updatedNote.deletedAt &&
-          localFolderManager.hasAnyFolderConfigured() &&
-          localFolderManager.getConfig().autoSyncToDisk
-        ) {
-          localFolderManager.saveNoteToLocalFolder(updatedNote, previousFileName).then((res) => {
-            if (res) {
-              setNotes((prev) =>
-                prev.map((n) =>
-                  n.id === updatedNote.id
-                    ? {
-                        ...n,
-                        localBackedUp: true,
-                        localFolderName: res.folderName,
-                        fileName: n.fileName || res.fileName,
-                      }
-                    : n
-                )
-              );
+        if (localFolderManager.hasAnyFolderConfigured()) {
+          if (updatedNote.deletedAt) {
+            cancelPendingLocalSync(updatedNote.id);
+            await localFolderManager.deleteNoteFromLocalFolder(updatedNote);
+          } else if (localFolderManager.getConfig().autoSyncToDisk) {
+            // Debounce disk writes while user is actively typing
+            const existingTimer = localFolderSyncTimers.current.get(updatedNote.id);
+            if (existingTimer) {
+              clearTimeout(existingTimer);
             }
-          }).catch((err) => {
-            console.warn('Auto local folder sync error:', err);
-          });
+
+            const prevPending = pendingSyncNotes.current.get(updatedNote.id);
+            const initialPrevFileName = prevPending?.previousFileName || previousFileName || updatedNote.fileName;
+            pendingSyncNotes.current.set(updatedNote.id, {
+              note: updatedNote,
+              previousFileName: initialPrevFileName,
+            });
+
+            const timer = setTimeout(async () => {
+              localFolderSyncTimers.current.delete(updatedNote.id);
+              const pending = pendingSyncNotes.current.get(updatedNote.id);
+              pendingSyncNotes.current.delete(updatedNote.id);
+              if (!pending || isNoteEmpty(pending.note) || pending.note.deletedAt) return;
+
+              try {
+                const res = await localFolderManager.saveNoteToLocalFolder(
+                  pending.note,
+                  pending.previousFileName
+                );
+                if (res) {
+                  setNotes((prev) =>
+                    prev.map((n) =>
+                      n.id === pending.note.id
+                        ? {
+                            ...n,
+                            localBackedUp: true,
+                            localFolderName: res.folderName,
+                            fileName: res.fileName,
+                          }
+                        : n
+                    )
+                  );
+                }
+              } catch (err) {
+                console.warn('Auto local folder sync error:', err);
+              }
+            }, 350);
+
+            localFolderSyncTimers.current.set(updatedNote.id, timer);
+          }
         }
       } catch (err) {
         console.error('Failed to persist note:', err);
       }
     },
-    [storageMode, directoryHandle]
+    [storageMode, directoryHandle, cancelPendingLocalSync]
   );
 
   // Update Note Title
@@ -709,9 +792,13 @@ export default function App() {
   const checkAndDeleteEmptyNote = useCallback(
     (noteId: string | null) => {
       if (!noteId) return;
+      cancelPendingLocalSync(noteId);
       setNotes((prev) => {
         const target = prev.find((n) => n.id === noteId);
         if (target && isNoteEmpty(target) && !target.deletedAt) {
+          if (localFolderManager.hasAnyFolderConfigured()) {
+            localFolderManager.deleteNoteFromLocalFolder(target).catch(() => {});
+          }
           if (storageMode === 'vercel') {
             syncManager.deleteNote(target.id).catch(() => {});
           } else if (storageMode === 'filesystem' && directoryHandle && target.fileName) {
@@ -724,27 +811,29 @@ export default function App() {
         return prev;
       });
     },
-    [storageMode, directoryHandle]
+    [storageMode, directoryHandle, cancelPendingLocalSync]
   );
 
   // Select Note
   const handleSelectNote = useCallback(
     (id: string) => {
       if (activeNoteId && activeNoteId !== id) {
+        flushPendingLocalSync(activeNoteId);
         checkAndDeleteEmptyNote(activeNoteId);
       }
       setActiveNoteId(id);
       setMobileView('editor');
     },
-    [activeNoteId, checkAndDeleteEmptyNote]
+    [activeNoteId, checkAndDeleteEmptyNote, flushPendingLocalSync]
   );
 
   const handleBackToList = useCallback(() => {
     if (activeNoteId) {
+      flushPendingLocalSync(activeNoteId);
       checkAndDeleteEmptyNote(activeNoteId);
     }
     setMobileView('list');
-  }, [activeNoteId, checkAndDeleteEmptyNote]);
+  }, [activeNoteId, checkAndDeleteEmptyNote, flushPendingLocalSync]);
 
   // Create New Note, Blog Post, or Project
   const handleNewNote = useCallback(
@@ -752,6 +841,10 @@ export default function App() {
       initialParams?: string | { title?: string; content?: string },
       noteType?: NoteType
     ) => {
+      if (activeNoteId) {
+        flushPendingLocalSync(activeNoteId);
+      }
+
       let title = '';
       let content = '';
 
@@ -793,6 +886,10 @@ export default function App() {
         const cleaned = prev.filter((n) => {
           const empty = isNoteEmpty(n) && !n.deletedAt;
           if (empty) {
+            cancelPendingLocalSync(n.id);
+            if (localFolderManager.hasAnyFolderConfigured()) {
+              localFolderManager.deleteNoteFromLocalFolder(n).catch(() => {});
+            }
             if (storageMode === 'vercel') {
               syncManager.deleteNote(n.id).catch(() => {});
             } else if (storageMode === 'filesystem' && directoryHandle && n.fileName) {
@@ -812,7 +909,7 @@ export default function App() {
         persistNote(newNote);
       }
     },
-    [selectedTag, persistNote, storageMode, directoryHandle]
+    [activeNoteId, selectedTag, persistNote, storageMode, directoryHandle, flushPendingLocalSync, cancelPendingLocalSync]
   );
 
   // Batch Delete Notes
@@ -820,6 +917,11 @@ export default function App() {
     async (noteIds: string[]) => {
       if (noteIds.length === 0) return;
       const idsSet = new Set(noteIds);
+
+      // Cancel any pending debounced saves for deleted notes
+      for (const id of noteIds) {
+        cancelPendingLocalSync(id);
+      }
 
       const sample = notes.find((n) => idsSet.has(n.id));
       if (!sample) return;
@@ -829,6 +931,9 @@ export default function App() {
         const updatedNotes = notes.map((n) => {
           if (idsSet.has(n.id)) {
             const updated = { ...n, deletedAt: now };
+            if (localFolderManager.hasAnyFolderConfigured()) {
+              localFolderManager.deleteNoteFromLocalFolder(n).catch(() => {});
+            }
             persistNote(updated);
             return updated;
           }
@@ -867,7 +972,7 @@ export default function App() {
         }
       }
     },
-    [notes, activeNoteId, storageMode, directoryHandle, persistNote]
+    [notes, activeNoteId, storageMode, directoryHandle, persistNote, cancelPendingLocalSync]
   );
 
   // Batch Toggle Pin Notes
@@ -926,6 +1031,16 @@ export default function App() {
       const noteToDelete = notes.find((n) => n.id === noteId);
       if (!noteToDelete) return;
 
+      // Cancel any pending debounced saves
+      cancelPendingLocalSync(noteId);
+
+      // Remove from local mapped folder immediately
+      if (localFolderManager.hasAnyFolderConfigured()) {
+        localFolderManager.deleteNoteFromLocalFolder(noteToDelete).catch((err) => {
+          console.warn('Error deleting note from local folder:', err);
+        });
+      }
+
       if (!noteToDelete.deletedAt) {
         // Soft delete: set deletedAt
         const updated = { ...noteToDelete, deletedAt: Date.now() };
@@ -936,11 +1051,6 @@ export default function App() {
           setActiveNoteId(activeRemaining.length > 0 ? activeRemaining[0].id : null);
         }
         persistNote(updated);
-
-        // Also remove file from local mapped folder immediately when sent to trash
-        if (localFolderManager.hasAnyFolderConfigured()) {
-          localFolderManager.deleteNoteFromLocalFolder(noteToDelete).catch(() => {});
-        }
       } else {
         // Permanent delete
         setNotes((prev) => prev.filter((n) => n.id !== noteId));
@@ -958,16 +1068,12 @@ export default function App() {
           } else {
             await deleteIndexedDBNote(noteId);
           }
-
-          if (localFolderManager.hasAnyFolderConfigured()) {
-            await localFolderManager.deleteNoteFromLocalFolder(noteToDelete);
-          }
         } catch (err) {
           console.error('Failed to permanently delete note from storage:', err);
         }
       }
     },
-    [notes, activeNoteId, storageMode, directoryHandle, persistNote]
+    [notes, activeNoteId, storageMode, directoryHandle, persistNote, cancelPendingLocalSync]
   );
 
   // Restore Note from Trash

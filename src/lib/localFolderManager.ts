@@ -361,24 +361,24 @@ class LocalFolderManager {
 
     const { handle: dirHandle, folderName, category } = dest;
 
-    // Generate accurate markdown filename
-    let targetFileName = note.fileName;
-    if (!targetFileName) {
-      const baseName = getNoteBaseName(note);
-      targetFileName = `${baseName}.md`;
-    }
+    // Generate accurate markdown filename based on current note title/slug
+    const baseName = getNoteBaseName(note);
+    const targetFileName = `${baseName}.md`;
 
-    // Ensure it ends with .md
-    if (!targetFileName.endsWith('.md')) {
-      targetFileName = `${targetFileName}.md`;
-    }
-
-    // If there is an old/previous filename and it differs from the new target, delete old file to avoid duplicates!
+    // Track and remove old file if name changed to prevent duplicate files on disk
+    const oldFilesToDelete = new Set<string>();
     if (previousFileName && previousFileName !== targetFileName) {
+      oldFilesToDelete.add(previousFileName);
+    }
+    if (note.fileName && note.fileName !== targetFileName) {
+      oldFilesToDelete.add(note.fileName);
+    }
+
+    for (const oldFile of oldFilesToDelete) {
       try {
-        await dirHandle.removeEntry(previousFileName);
+        await dirHandle.removeEntry(oldFile);
       } catch (e) {
-        // File may not exist yet, safe to ignore
+        // Safe to ignore if didn't exist
       }
     }
 
@@ -409,27 +409,70 @@ class LocalFolderManager {
     if (!dest) return false;
 
     const { handle: dirHandle } = dest;
-    const targetFile = fileNameToDelete || note.fileName || `${getNoteBaseName(note)}.md`;
+    const candidates = new Set<string>();
+    if (fileNameToDelete) candidates.add(fileNameToDelete);
+    if (note.fileName) candidates.add(note.fileName);
 
-    let deleted = false;
-
-    // 1. Remove markdown file
-    try {
-      await dirHandle.removeEntry(targetFile);
-      deleted = true;
-    } catch (e) {
-      // File may already be deleted or not yet created
+    const baseName = getNoteBaseName(note);
+    candidates.add(`${baseName}.md`);
+    if (note.title) {
+      const slugTitle = slugify(note.title);
+      if (slugTitle) {
+        candidates.add(`${slugTitle}.md`);
+        if (note.date) candidates.add(`${note.date}-${slugTitle}.md`);
+      }
     }
 
-    // 2. Also remove matching asset directory if one was created for this post
-    const baseName = targetFile.replace(/\.md$/, '');
-    try {
-      await (dirHandle as any).removeEntry(baseName, { recursive: true });
-    } catch (e) {
-      // Asset subfolder might not exist, safe to ignore
+    let deletedAny = false;
+
+    // 1. Direct candidate removals
+    for (const cand of candidates) {
+      const cleanName = cand.endsWith('.md') ? cand : `${cand}.md`;
+      try {
+        await dirHandle.removeEntry(cleanName);
+        deletedAny = true;
+      } catch (e) {
+        // Entry might not exist with this name
+      }
+
+      // Also try removing matching asset subfolder
+      const assetSubDir = cleanName.replace(/\.md$/, '');
+      try {
+        await (dirHandle as any).removeEntry(assetSubDir, { recursive: true });
+      } catch (e) {
+        // Asset subfolder might not exist, safe to ignore
+      }
     }
 
-    return deleted;
+    // 2. Scan directory to catch any file matching note id or title
+    try {
+      for await (const entry of (dirHandle as any).values()) {
+        if (entry.kind === 'file' && (entry.name.endsWith('.md') || entry.name.endsWith('.markdown'))) {
+          try {
+            const file: File = await entry.getFile();
+            const text = await file.text();
+            if (
+              (note.id && text.includes(`id: "${note.id}"`)) ||
+              (note.id && text.includes(`id: ${note.id}`)) ||
+              (note.title && text.includes(`title: "${note.title}"`)) ||
+              (note.title && text.includes(`title: '${note.title}'`))
+            ) {
+              await dirHandle.removeEntry(entry.name);
+              deletedAny = true;
+
+              const assetFolder = entry.name.replace(/\.(md|markdown)$/, '');
+              try {
+                await (dirHandle as any).removeEntry(assetFolder, { recursive: true });
+              } catch (e) {}
+            }
+          } catch (e) {}
+        }
+      }
+    } catch (e) {
+      console.warn('Error scanning directory for note deletion:', e);
+    }
+
+    return deletedAny;
   }
 
   // Sync all active notes into local folders and delete trashed notes from disk

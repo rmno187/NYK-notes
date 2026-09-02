@@ -21,12 +21,6 @@ export function slugify(text: string): string {
  * e.g. "2026.02.01-my-amazing-project" or "2026-02-01-my-post"
  */
 export function getNoteBaseName(note: Partial<Note>, fallbackTimestamp?: number): string {
-  if (note.fileName) {
-    const cleanFileName = note.fileName.split('/').pop()?.split('\\').pop() || note.fileName;
-    const withoutExt = cleanFileName.replace(/\.(md|markdown|txt)$/i, '');
-    if (withoutExt) return withoutExt;
-  }
-
   let noteDate: Date;
 
   if (note.date) {
@@ -51,16 +45,20 @@ export function getNoteBaseName(note: Partial<Note>, fallbackTimestamp?: number)
   const day = String(noteDate.getDate()).padStart(2, '0');
   const dateStamp = `${year}-${month}-${day}`;
 
-  const rawTitle = (note.slug || note.title || '')
-    .toLowerCase()
-    .trim()
-    .replace(/[^\w\s-]/g, '')
-    .replace(/[\s_]+/g, '-')
-    .replace(/^-+|-+$/g, '');
-
-  if (rawTitle) {
-    return `${dateStamp}-${rawTitle}`;
+  const cleanTitle = slugify(note.slug || note.title || '');
+  if (cleanTitle) {
+    if (note.type === 'project' && note.slug) {
+      return note.slug;
+    }
+    return `${dateStamp}-${cleanTitle}`;
   }
+
+  if (note.fileName) {
+    const cleanFileName = note.fileName.split('/').pop()?.split('\\').pop() || note.fileName;
+    const withoutExt = cleanFileName.replace(/\.(md|markdown|txt)$/i, '');
+    if (withoutExt) return withoutExt;
+  }
+
   return dateStamp;
 }
 
