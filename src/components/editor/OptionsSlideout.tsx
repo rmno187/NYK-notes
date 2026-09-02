@@ -36,6 +36,7 @@ interface OptionsSlideoutProps {
   storageMode?: StorageMode;
   directoryName?: string;
   onOpenDirectoryModal?: () => void;
+  onOpenLocalFolderSyncModal?: () => void;
   onOpenBackupModal?: () => void;
   onOpenImportModal?: () => void;
   onOpenShortcutsModal?: () => void;
@@ -76,6 +77,7 @@ export const OptionsSlideout: React.FC<OptionsSlideoutProps> = ({
   storageMode,
   directoryName,
   onOpenDirectoryModal,
+  onOpenLocalFolderSyncModal,
   onOpenBackupModal,
   onOpenImportModal,
   onOpenShortcutsModal,
@@ -1145,19 +1147,26 @@ export const OptionsSlideout: React.FC<OptionsSlideoutProps> = ({
                         onClose();
                       }}
                       className="group flex items-center gap-1.5 text-left shrink-0"
-                      title={directoryName ? `Save note to folder "${directoryName}"` : 'Save note to local device'}
+                      title={
+                        note.localFolderName || directoryName
+                          ? `Save note to folder "${note.localFolderName || directoryName}"`
+                          : 'Save note to local device'
+                      }
                     >
                       <span className="text-sm text-black dark:text-white group-hover:underline underline-offset-4">
                         Save
                       </span>
                     </button>
 
-                    {directoryName ? (
+                    {(note.localFolderName || directoryName) ? (
                       <div className="flex items-center gap-2 max-w-[210px]">
                         <button
                           type="button"
                           onClick={() => {
-                            if (onChangeSaveDirectory) {
+                            if (onOpenLocalFolderSyncModal) {
+                              onOpenLocalFolderSyncModal();
+                              onClose();
+                            } else if (onChangeSaveDirectory) {
                               onChangeSaveDirectory();
                             } else if (onOpenDirectoryModal) {
                               onOpenDirectoryModal();
@@ -1165,10 +1174,10 @@ export const OptionsSlideout: React.FC<OptionsSlideoutProps> = ({
                             }
                           }}
                           className="flex items-center gap-1 text-xs font-mono text-neutral-600 dark:text-neutral-400 hover:text-black dark:hover:text-white underline underline-offset-2 truncate"
-                          title={`Save folder: ${directoryName}. Click to change.`}
+                          title={`Save folder: ${note.localFolderName || directoryName}. Click to change.`}
                         >
                           <FolderOpen className="w-3.5 h-3.5 shrink-0 text-neutral-500" />
-                          <span className="truncate">{directoryName}</span>
+                          <span className="truncate">{note.localFolderName || directoryName}</span>
                         </button>
                         {onRemoveSaveDirectory && (
                           <button
@@ -1188,8 +1197,13 @@ export const OptionsSlideout: React.FC<OptionsSlideoutProps> = ({
                       <button
                         type="button"
                         onClick={() => {
-                          onSaveToLocalFolder();
-                          onClose();
+                          if (onOpenLocalFolderSyncModal) {
+                            onOpenLocalFolderSyncModal();
+                            onClose();
+                          } else {
+                            onSaveToLocalFolder();
+                            onClose();
+                          }
                         }}
                         className="text-xs text-neutral-400 dark:text-neutral-600 hover:text-black dark:hover:text-white"
                       >
@@ -1383,6 +1397,25 @@ export const OptionsSlideout: React.FC<OptionsSlideoutProps> = ({
                       : storageMode === 'filesystem' && directoryName
                       ? directoryName
                       : 'Browser'}
+                  </span>
+                </button>
+              )}
+
+              {/* Blog Repo & Folder Sync */}
+              {onOpenLocalFolderSyncModal && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    onOpenLocalFolderSyncModal();
+                    onClose();
+                  }}
+                  className="group flex items-center justify-between py-2.5 text-left"
+                >
+                  <span className="text-sm text-black dark:text-white group-hover:underline underline-offset-4">
+                    Blog Sync (Local)
+                  </span>
+                  <span className="text-xs text-neutral-400 dark:text-neutral-600 max-w-[150px] truncate">
+                    posts / projects / notes
                   </span>
                 </button>
               )}

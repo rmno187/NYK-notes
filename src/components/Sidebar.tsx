@@ -11,6 +11,7 @@ import {
   ChevronDown,
   RefreshCw,
   FolderOpen,
+  HardDrive,
 } from 'lucide-react';
 import { Note, StorageMode, NoteType } from '../types';
 import { NotePreview } from './NotePreview';
@@ -38,6 +39,8 @@ interface SidebarProps {
   onOpenSettingsModal?: () => void;
   storageMode?: StorageMode;
   onOpenSyncModal?: () => void;
+  onOpenLocalFolderSyncModal?: () => void;
+  isLocalFolderConfigured?: boolean;
   onOpenLocalFile?: () => void;
   className?: string;
 }
@@ -55,6 +58,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onSearchChange,
   storageMode,
   onOpenSyncModal,
+  onOpenLocalFolderSyncModal,
+  isLocalFolderConfigured,
   onOpenLocalFile,
   className = '',
 }) => {
@@ -562,6 +567,28 @@ export const Sidebar: React.FC<SidebarProps> = ({
                       {trashedNotes.length}
                     </span>
                   </button>
+
+                  {/* LOCAL FOLDER SYNC */}
+                  {onOpenLocalFolderSyncModal && (
+                    <div className="pt-1 border-t border-neutral-100 dark:border-neutral-800">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsFolderDropdownOpen(false);
+                          onOpenLocalFolderSyncModal();
+                        }}
+                        className="w-full px-3 py-2 text-left flex items-center justify-between text-xs text-neutral-600 dark:text-neutral-400 hover:text-black dark:hover:text-white hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors"
+                      >
+                        <div className="flex items-center space-x-2">
+                          <HardDrive className="w-3.5 h-3.5" />
+                          <span>Local Folder Sync</span>
+                        </div>
+                        {isLocalFolderConfigured && (
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" title="Connected" />
+                        )}
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -641,6 +668,29 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 </button>
               )}
             </div>
+
+            {/* Local Folder Sync trigger / indicator */}
+            {onOpenLocalFolderSyncModal && (
+              <button
+                type="button"
+                onClick={onOpenLocalFolderSyncModal}
+                className={`p-1 rounded transition-colors text-xs flex items-center gap-1 ${
+                  isLocalFolderConfigured
+                    ? 'text-neutral-700 dark:text-neutral-300 hover:text-black dark:hover:text-white'
+                    : 'text-neutral-400 hover:text-black dark:hover:text-white'
+                }`}
+                title={
+                  isLocalFolderConfigured
+                    ? 'Local Blog Repo Folder connected. Click to manage sync.'
+                    : 'Connect Local Blog Folders (Posts, Projects, Notes)'
+                }
+              >
+                <HardDrive className="w-3.5 h-3.5" />
+                {isLocalFolderConfigured && (
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
+                )}
+              </button>
+            )}
 
             {/* Sync status indicator if Vercel Sync is active or configured */}
             {storageMode === 'vercel' && onOpenSyncModal && (
@@ -791,14 +841,42 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
                   <div className="flex items-start justify-between gap-1">
                     {noteTitle ? (
-                      <h3 className="font-bold truncate flex-1 min-w-0">
-                        {noteTitle}
-                      </h3>
+                      <div className="flex items-center gap-1.5 flex-1 min-w-0">
+                        <h3 className="font-bold truncate flex-1 min-w-0">
+                          {noteTitle}
+                        </h3>
+                        {(note.localBackedUp || storageMode === 'filesystem') && (
+                          <span
+                            className="shrink-0 text-emerald-600 dark:text-emerald-400 opacity-80 group-hover:opacity-100 transition-opacity"
+                            title={
+                              note.localFolderName
+                                ? `Local device backup: ${note.localFolderName}/${note.fileName || ''}`
+                                : 'Local device backup'
+                            }
+                          >
+                            <HardDrive className="w-3 h-3" />
+                          </span>
+                        )}
+                      </div>
                     ) : (
-                      <div className="mt-1 text-sm flex-1 min-w-0">
-                        <NotePreview
-                          content={note.description || note.content}
-                        />
+                      <div className="mt-1 text-sm flex-1 min-w-0 flex items-start gap-1.5">
+                        <div className="flex-1 min-w-0">
+                          <NotePreview
+                            content={note.description || note.content}
+                          />
+                        </div>
+                        {(note.localBackedUp || storageMode === 'filesystem') && (
+                          <span
+                            className="shrink-0 mt-0.5 text-emerald-600 dark:text-emerald-400 opacity-80 group-hover:opacity-100 transition-opacity"
+                            title={
+                              note.localFolderName
+                                ? `Local device backup: ${note.localFolderName}/${note.fileName || ''}`
+                                : 'Local device backup'
+                            }
+                          >
+                            <HardDrive className="w-3 h-3" />
+                          </span>
+                        )}
                       </div>
                     )}
 

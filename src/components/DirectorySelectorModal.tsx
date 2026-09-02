@@ -13,6 +13,7 @@ interface DirectorySelectorModalProps {
   onSwitchToIndexedDB: () => void;
   onSwitchToVercelSync: () => void;
   onOpenSyncSettings: () => void;
+  onOpenLocalFolderSyncModal?: () => void;
 }
 
 export const DirectorySelectorModal: React.FC<DirectorySelectorModalProps> = ({
@@ -24,6 +25,7 @@ export const DirectorySelectorModal: React.FC<DirectorySelectorModalProps> = ({
   onSwitchToIndexedDB,
   onSwitchToVercelSync,
   onOpenSyncSettings,
+  onOpenLocalFolderSyncModal,
 }) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -190,6 +192,42 @@ export const DirectorySelectorModal: React.FC<DirectorySelectorModalProps> = ({
               </div>
             )}
           </div>
+
+          {/* 2b. Blog Repo & Content Folders (Posts / Projects / Notes) */}
+          {onOpenLocalFolderSyncModal && (
+            <div className="py-4 border-b border-neutral-200 dark:border-neutral-800">
+              <div className="flex items-start justify-between gap-6">
+                <div className="flex items-start gap-3 min-w-0">
+                  <div className="w-4 h-4 mt-0.5 shrink-0 flex items-center justify-center font-mono text-xs font-bold text-black dark:text-white">
+                    //
+                  </div>
+
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <h4 className="text-sm font-medium text-black dark:text-white">
+                        Blog Repository & Content Folders
+                      </h4>
+                    </div>
+
+                    <p className="mt-1 text-xs leading-relaxed text-neutral-500 dark:text-neutral-400 max-w-md">
+                      Map dedicated folders for <code className="font-mono text-[11px]">posts/</code>, <code className="font-mono text-[11px]">projects/</code>, and <code className="font-mono text-[11px]">notes/</code> for direct Git workflow sync.
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    onClose();
+                    onOpenLocalFolderSyncModal();
+                  }}
+                  className="shrink-0 text-xs font-medium text-black dark:text-white underline underline-offset-4 decoration-neutral-300 dark:decoration-neutral-700 hover:decoration-black dark:hover:decoration-white transition-colors"
+                >
+                  Configure
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* Section: Vercel Storage Option */}
           <div className="pt-4 pb-1">

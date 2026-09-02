@@ -86,6 +86,7 @@ export interface EditorPaneProps {
   storageMode?: StorageMode;
   directoryName?: string;
   onOpenDirectoryModal?: () => void;
+  onOpenLocalFolderSyncModal?: () => void;
   onOpenSyncModal?: () => void;
   onOpenBackupModal?: () => void;
   onOpenImportModal?: () => void;

@@ -39,6 +39,23 @@ export interface Note {
   // Image assets
   images?: NoteImage[];
   imageFolderStrategy?: ImageFolderStrategy;
+  // Local Disk Backup / Git Sync state
+  localBackedUp?: boolean;
+  localSyncedAt?: number;
+  localFolderCategory?: 'posts' | 'projects' | 'notes' | 'root' | string;
+  localFolderName?: string;
+}
+
+export interface LocalFolderConfig {
+  rootHandle?: FileSystemDirectoryHandle | null;
+  rootName?: string;
+  postsHandle?: FileSystemDirectoryHandle | null;
+  postsName?: string;
+  projectsHandle?: FileSystemDirectoryHandle | null;
+  projectsName?: string;
+  notesHandle?: FileSystemDirectoryHandle | null;
+  notesName?: string;
+  autoSyncToDisk?: boolean;
 }
 
 export type StorageMode = 'filesystem' | 'indexeddb' | 'vercel';

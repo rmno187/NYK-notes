@@ -53,6 +53,7 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
   storageMode,
   directoryName,
   onOpenDirectoryModal,
+  onOpenLocalFolderSyncModal,
   onOpenBackupModal,
   onOpenImportModal,
   onOpenShortcutsModal,
@@ -732,6 +733,7 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
         storageMode={storageMode}
         directoryName={directoryName}
         onOpenDirectoryModal={onOpenDirectoryModal}
+        onOpenLocalFolderSyncModal={onOpenLocalFolderSyncModal}
         onOpenBackupModal={onOpenBackupModal}
         onOpenImportModal={onOpenImportModal}
         onOpenShortcutsModal={onOpenShortcutsModal}
