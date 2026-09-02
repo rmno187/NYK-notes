@@ -1165,6 +1165,38 @@ export default function App() {
     }
   }, [activeNote, directoryHandle, persistNote, showToast]);
 
+  // Change active save location folder
+  const handleChangeSaveDirectory = useCallback(async () => {
+    try {
+      const handle = await selectLocalDirectory();
+      setDirectoryHandle(handle);
+      setDirectoryName(handle.name);
+      setStorageMode('filesystem');
+      localStorage.setItem('active_storage_mode', 'filesystem');
+
+      const dirNotes = await loadNotesFromDirectory(handle);
+      if (dirNotes && dirNotes.length > 0) {
+        setNotes(dirNotes);
+        setActiveNoteId(dirNotes[0].id);
+      }
+      showToast(`Save folder changed to "${handle.name}"`);
+    } catch (err: any) {
+      if (err && err.name !== 'AbortError' && !err.message?.includes('cancelled')) {
+        showToast(`Failed to select directory: ${err.message || 'Error'}`);
+      }
+    }
+  }, [showToast]);
+
+  // Remove / Disconnect active save folder
+  const handleRemoveSaveDirectory = useCallback(async () => {
+    setDirectoryHandle(null);
+    setDirectoryName('');
+    if (storageMode === 'filesystem') {
+      await handleSwitchToIndexedDB();
+    }
+    showToast('Save folder location removed');
+  }, [storageMode, handleSwitchToIndexedDB, showToast]);
+
   // Open .md note from local storage
   const handleOpenLocalMarkdownFile = useCallback(async () => {
     try {
@@ -1277,6 +1309,8 @@ export default function App() {
               onToggleEditorMode={handleToggleEditorMode}
               onBackToList={handleBackToList}
               onSaveToLocalFolder={handleSaveCurrentNoteToLocalFolder}
+              onChangeSaveDirectory={handleChangeSaveDirectory}
+              onRemoveSaveDirectory={handleRemoveSaveDirectory}
               onRenameFileName={handleRenameFileName}
               onOpenLocalFile={handleOpenLocalMarkdownFile}
               toastMessage={toastMessage}

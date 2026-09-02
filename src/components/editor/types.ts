@@ -55,6 +55,8 @@ export interface EditorPaneProps {
   onBackToList?: () => void;
   // Local File System / Folder Ops
   onSaveToLocalFolder?: () => Promise<void> | void;
+  onChangeSaveDirectory?: () => Promise<void> | void;
+  onRemoveSaveDirectory?: () => Promise<void> | void;
   onOpenLocalFile?: () => Promise<void> | void;
   onRenameFileName?: (newFileName: string) => void;
   toastMessage?: string | null;

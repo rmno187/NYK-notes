@@ -1,5 +1,5 @@
 import React, { useRef, useState, useEffect } from 'react';
-import { X, Check } from 'lucide-react';
+import { X, Check, FolderOpen } from 'lucide-react';
 import { Note, EditorMode, StorageMode, Theme, NoteType } from '../../types';
 import { slugify, getNoteBaseName } from '../../lib/noteUtils';
 
@@ -26,6 +26,8 @@ interface OptionsSlideoutProps {
   onDeleteNote?: () => void;
   onRestoreNote?: () => void;
   onSaveToLocalFolder?: () => Promise<void> | void;
+  onChangeSaveDirectory?: () => Promise<void> | void;
+  onRemoveSaveDirectory?: () => Promise<void> | void;
   onRenameFileName?: (newFileName: string) => void;
   mode: EditorMode;
   onSetMode: (mode: EditorMode) => void;
@@ -64,6 +66,8 @@ export const OptionsSlideout: React.FC<OptionsSlideoutProps> = ({
   onDeleteNote,
   onRestoreNote,
   onSaveToLocalFolder,
+  onChangeSaveDirectory,
+  onRemoveSaveDirectory,
   onRenameFileName,
   mode,
   onSetMode,
@@ -1132,19 +1136,68 @@ export const OptionsSlideout: React.FC<OptionsSlideoutProps> = ({
               )}
 
               {onSaveToLocalFolder && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    onSaveToLocalFolder();
-                    onClose();
-                  }}
-                  className="group flex items-center justify-between py-2.5 text-left"
-                >
-                  <span className="text-sm text-black dark:text-white group-hover:underline underline-offset-4">
-                    Save
-                  </span>
-                  <span className="text-xs text-neutral-400 dark:text-neutral-600">Save to local device</span>
-                </button>
+                <div className="py-2.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onSaveToLocalFolder();
+                        onClose();
+                      }}
+                      className="group flex items-center gap-1.5 text-left shrink-0"
+                      title={directoryName ? `Save note to folder "${directoryName}"` : 'Save note to local device'}
+                    >
+                      <span className="text-sm text-black dark:text-white group-hover:underline underline-offset-4">
+                        Save
+                      </span>
+                    </button>
+
+                    {directoryName ? (
+                      <div className="flex items-center gap-2 max-w-[210px]">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (onChangeSaveDirectory) {
+                              onChangeSaveDirectory();
+                            } else if (onOpenDirectoryModal) {
+                              onOpenDirectoryModal();
+                              onClose();
+                            }
+                          }}
+                          className="flex items-center gap-1 text-xs font-mono text-neutral-600 dark:text-neutral-400 hover:text-black dark:hover:text-white underline underline-offset-2 truncate"
+                          title={`Save folder: ${directoryName}. Click to change.`}
+                        >
+                          <FolderOpen className="w-3.5 h-3.5 shrink-0 text-neutral-500" />
+                          <span className="truncate">{directoryName}</span>
+                        </button>
+                        {onRemoveSaveDirectory && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onRemoveSaveDirectory();
+                            }}
+                            className="text-[11px] text-neutral-400 hover:text-red-600 dark:hover:text-red-400 underline underline-offset-2 shrink-0 transition-colors"
+                            title="Remove save location folder"
+                          >
+                            Remove
+                          </button>
+                        )}
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          onSaveToLocalFolder();
+                          onClose();
+                        }}
+                        className="text-xs text-neutral-400 dark:text-neutral-600 hover:text-black dark:hover:text-white"
+                      >
+                        Save to local device
+                      </button>
+                    )}
+                  </div>
+                </div>
               )}
             </div>
           </section>
@@ -1220,17 +1273,6 @@ export const OptionsSlideout: React.FC<OptionsSlideoutProps> = ({
                     </div>
                   </div>
                 )}
-              </div>
-
-              {/* Asset Directory */}
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-neutral-500 dark:text-neutral-500 shrink-0">Asset folder</span>
-                <span className="text-neutral-700 dark:text-neutral-300 font-mono text-[11px] truncate max-w-[200px]" title={`./${currentBaseName}/`}>
-                  ./{currentBaseName}/
-                  {note.images && note.images.length > 0 && (
-                    <span className="ml-1 text-[10px] text-neutral-400">({note.images.length} img{note.images.length === 1 ? '' : 's'})</span>
-                  )}
-                </span>
               </div>
 
               {note.type === 'post' && (

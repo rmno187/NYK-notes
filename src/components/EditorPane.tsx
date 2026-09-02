@@ -28,6 +28,8 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
   onToggleEditorMode,
   onBackToList,
   onSaveToLocalFolder,
+  onChangeSaveDirectory,
+  onRemoveSaveDirectory,
   onRenameFileName,
   toastMessage,
   onChangeDescription,
@@ -604,7 +606,7 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
       {/* Content Area: Title + WYSIWYG or Raw Markdown */}
       <div
         ref={contentScrollRef}
-        className="flex-1 p-4 sm:p-6 overflow-y-auto relative min-w-0 w-full flex flex-col order-1 md:order-2"
+        className="flex-1 p-4 sm:p-6 pb-48 sm:pb-64 overflow-y-auto relative min-w-0 w-full flex flex-col order-1 md:order-2"
       >
         {/* Title */}
         <div className="mb-4 pb-2 border-b border-neutral-100 dark:border-neutral-900 shrink-0">
@@ -655,7 +657,7 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
             onTouchEnd={updateSelectionState}
             onSelect={updateSelectionState}
             onPaste={handleWysiwygPaste}
-            className="editor-wysiwyg w-full min-h-[350px] outline-none text-neutral-900 dark:text-neutral-100"
+            className="editor-wysiwyg w-full min-h-[350px] outline-none text-neutral-900 dark:text-neutral-100 pb-28"
           />
         ) : (
           <textarea
@@ -671,9 +673,12 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
             onTouchEnd={updateSelectionState}
             onSelect={updateSelectionState}
             placeholder="Type raw markdown here..."
-            className="w-full min-h-[350px] resize-none bg-transparent text-neutral-900 dark:text-neutral-100 placeholder-neutral-400 dark:placeholder-neutral-600 font-mono text-sm leading-relaxed focus:outline-none overflow-hidden"
+            className="w-full min-h-[350px] resize-none bg-transparent text-neutral-900 dark:text-neutral-100 placeholder-neutral-400 dark:placeholder-neutral-600 font-mono text-sm leading-relaxed focus:outline-none overflow-hidden pb-28"
           />
         )}
+
+        {/* Empty space buffer at bottom so content never gets hidden behind toolbars */}
+        <div className="h-36 shrink-0 pointer-events-none" aria-hidden="true" />
       </div>
 
       {/* Link Insertion Modal */}
@@ -720,6 +725,8 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
         onDeleteNote={onDeleteNote}
         onRestoreNote={onRestoreNote}
         onSaveToLocalFolder={onSaveToLocalFolder}
+        onChangeSaveDirectory={onChangeSaveDirectory}
+        onRemoveSaveDirectory={onRemoveSaveDirectory}
         onRenameFileName={onRenameFileName}
         mode={mode}
         onSetMode={setMode}
