@@ -68,14 +68,22 @@ export const LocalFolderSyncModal: React.FC<LocalFolderSyncModalProps> = ({
     setIsLoading(true);
     setActionMessage(null);
     try {
-      const handle = await localFolderManager.pickRootDirectory();
-      if (handle) {
+      const res = await localFolderManager.pickRootDirectory();
+      if (res) {
         const updated = localFolderManager.getConfig();
         setConfig(updated);
-        setActionMessage({
-          text: `Connected root folder "${handle.name}". Subfolders "posts/", "projects/", and "notes/" will be synchronized automatically.`,
-          type: 'success',
-        });
+        const imported = res.loadedNotes;
+        if (imported && imported.length > 0) {
+          onNotesUpdated?.(imported);
+          const msg = `Connected root folder "${res.handle.name}" & automatically imported ${imported.length} item${imported.length === 1 ? '' : 's'} from disk.`;
+          setActionMessage({ text: msg, type: 'success' });
+          onSyncComplete?.(msg);
+        } else {
+          setActionMessage({
+            text: `Connected root folder "${res.handle.name}". Subfolders "posts/", "projects/", and "notes/" will be synchronized automatically.`,
+            type: 'success',
+          });
+        }
       }
     } catch (err: any) {
       setActionMessage({ text: err.message || 'Failed to select root folder', type: 'error' });
@@ -88,14 +96,22 @@ export const LocalFolderSyncModal: React.FC<LocalFolderSyncModalProps> = ({
     setIsLoading(true);
     setActionMessage(null);
     try {
-      const handle = await localFolderManager.pickCategoryDirectory(category);
-      if (handle) {
+      const res = await localFolderManager.pickCategoryDirectory(category);
+      if (res) {
         const updated = localFolderManager.getConfig();
         setConfig(updated);
-        setActionMessage({
-          text: `Mapped ${category} folder to "${handle.name}".`,
-          type: 'success',
-        });
+        const imported = res.loadedNotes;
+        if (imported && imported.length > 0) {
+          onNotesUpdated?.(imported);
+          const msg = `Mapped ${category} folder to "${res.handle.name}" & automatically imported ${imported.length} item${imported.length === 1 ? '' : 's'} from disk.`;
+          setActionMessage({ text: msg, type: 'success' });
+          onSyncComplete?.(msg);
+        } else {
+          setActionMessage({
+            text: `Mapped ${category} folder to "${res.handle.name}". Folder is currently empty.`,
+            type: 'success',
+          });
+        }
       }
     } catch (err: any) {
       setActionMessage({ text: err.message || `Failed to select ${category} folder`, type: 'error' });

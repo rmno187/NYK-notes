@@ -14,7 +14,7 @@ import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { convertHtmlToMarkdown, parseMarkdownNote, formatBlogDate } from './lib/markdown';
 import { saveNoteToLocalFolder, openLocalMarkdownFile } from './lib/localFileOperations';
 import { isMac, modSymbol } from './lib/platform';
-import { isNoteEmpty, slugify, syncNoteImagePathsOnRename } from './lib/noteUtils';
+import { isNoteEmpty, slugify, syncNoteImagePathsOnRename, mergeNotes } from './lib/noteUtils';
 import { importNotesFromFiles } from './lib/importUtils';
 import { Sidebar } from './components/Sidebar';
 import { EditorPane } from './components/EditorPane';
@@ -182,61 +182,115 @@ export default function App() {
   // Initial Data Load & Sync Manager init
   useEffect(() => {
     const initApp = async () => {
-      // 1. Check if Vercel Sync was previously active/configured
-      const savedStorageMode = localStorage.getItem('active_storage_mode') as StorageMode | null;
-      const isSyncReady = await syncManager.initialize();
-
-      if (savedStorageMode === 'vercel' && isSyncReady) {
-        setStorageMode('vercel');
-        const vercelNotes = await syncManager.loadNotes();
-        if (vercelNotes && vercelNotes.length > 0) {
-          setNotes(vercelNotes);
-          const activeList = vercelNotes.filter((n) => !n.deletedAt);
-          setActiveNoteId(activeList.length > 0 ? activeList[0].id : vercelNotes[0].id);
-          return;
-        }
-      }
-
-      // 2. Otherwise load default IndexedDB
       try {
-        const storedNotes = await getIndexedDBNotes();
-        if (storedNotes && storedNotes.length > 0) {
-          // Auto-cleanup items soft-deleted over 30 days ago
-          const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
-          const now = Date.now();
-          const validNotes: Note[] = [];
+        const savedStorageMode = localStorage.getItem('active_storage_mode') as StorageMode | null;
+        const isSyncReady = await syncManager.initialize();
+        await localFolderManager.initialize();
 
-          for (const note of storedNotes) {
-            if (note.deletedAt && now - note.deletedAt > THIRTY_DAYS_MS) {
-              await deleteIndexedDBNote(note.id);
-            } else if (isNoteEmpty(note) && !note.deletedAt) {
-              await deleteIndexedDBNote(note.id);
-            } else {
-              const cleanNote =
-                note.content.trim().startsWith('<p>') && note.content.includes('</p>')
-                  ? { ...note, content: convertHtmlToMarkdown(note.content) }
-                  : note;
-              validNotes.push(cleanNote);
+        // 1. Load notes from IndexedDB
+        let idbNotes: Note[] = [];
+        try {
+          const stored = await getIndexedDBNotes();
+          if (stored && stored.length > 0) {
+            const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
+            const now = Date.now();
+            for (const note of stored) {
+              if (note.deletedAt && now - note.deletedAt > THIRTY_DAYS_MS) {
+                await deleteIndexedDBNote(note.id);
+              } else if (isNoteEmpty(note) && !note.deletedAt) {
+                await deleteIndexedDBNote(note.id);
+              } else {
+                const cleanNote =
+                  note.content.trim().startsWith('<p>') && note.content.includes('</p>')
+                    ? { ...note, content: convertHtmlToMarkdown(note.content) }
+                    : note;
+                idbNotes.push(cleanNote);
+              }
             }
           }
+        } catch (e) {
+          console.warn('Failed to load IndexedDB notes:', e);
+        }
 
-          setNotes(validNotes);
-          const activeList = validNotes.filter((n) => !n.deletedAt);
-          if (activeList.length > 0) {
-            setActiveNoteId(activeList[0].id);
-          } else if (validNotes.length > 0) {
-            setActiveNoteId(validNotes[0].id);
+        // 2. Automatically load notes from configured local folders (posts, projects, notes)
+        let localFolderNotes: Note[] = [];
+        if (localFolderManager.hasAnyFolderConfigured()) {
+          try {
+            localFolderNotes = await localFolderManager.loadAllNotesFromLocalFolders();
+          } catch (e) {
+            console.warn('Could not auto-load local folders on startup:', e);
           }
-        } else {
-          // Initialize default onboarding notes
+        }
+
+        // 3. Load notes from Vercel sync if configured
+        let vercelNotes: Note[] = [];
+        if (isSyncReady) {
+          try {
+            vercelNotes = (await syncManager.loadNotes()) || [];
+          } catch (e) {
+            console.warn('Could not load Vercel sync notes on startup:', e);
+          }
+        }
+
+        // 4. Merge all sources seamlessly so NO local or remote notes are ever lost
+        let combined = mergeNotes(idbNotes, localFolderNotes);
+        combined = mergeNotes(combined, vercelNotes);
+
+        if (combined.length === 0) {
+          // Initialize default onboarding notes if completely blank
           for (const note of DEFAULT_WELCOME_NOTES) {
             await saveIndexedDBNote(note);
           }
-          setNotes(DEFAULT_WELCOME_NOTES);
-          setActiveNoteId(DEFAULT_WELCOME_NOTES[0].id);
+          combined = DEFAULT_WELCOME_NOTES;
+        } else {
+          // Keep local IndexedDB backup fresh with all merged notes
+          for (const note of combined) {
+            if (!isNoteEmpty(note)) {
+              await saveIndexedDBNote(note).catch(() => {});
+            }
+          }
+
+          // If Vercel Sync is configured, push any new local notes so mobile has everything
+          if (isSyncReady) {
+            for (const note of combined) {
+              if (!isNoteEmpty(note)) {
+                await syncManager.saveNote(note).catch(() => {});
+              }
+            }
+          }
+
+          // If local folders are configured and auto-sync is on, write any newly synced remote notes to disk
+          if (
+            localFolderManager.hasAnyFolderConfigured() &&
+            localFolderManager.getConfig().autoSyncToDisk
+          ) {
+            for (const note of combined) {
+              if (!isNoteEmpty(note) && !note.deletedAt) {
+                localFolderManager.saveNoteToLocalFolder(note).catch(() => {});
+              }
+            }
+          }
+        }
+
+        // Determine active storage mode
+        if (savedStorageMode === 'vercel' && isSyncReady) {
+          setStorageMode('vercel');
+        } else if (savedStorageMode === 'filesystem') {
+          // Filesystem mode handled separately if active directory handle is re-acquired
+          setStorageMode('indexeddb');
+        } else {
+          setStorageMode('indexeddb');
+        }
+
+        setNotes(combined);
+        const activeList = combined.filter((n) => !n.deletedAt);
+        if (activeList.length > 0) {
+          setActiveNoteId(activeList[0].id);
+        } else if (combined.length > 0) {
+          setActiveNoteId(combined[0].id);
         }
       } catch (err) {
-        console.error('Failed to load initial notes from IndexedDB:', err);
+        console.error('Failed to initialize app state:', err);
         setNotes(DEFAULT_WELCOME_NOTES);
         setActiveNoteId(DEFAULT_WELCOME_NOTES[0].id);
       }
@@ -250,8 +304,33 @@ export default function App() {
     if (storageMode !== 'vercel') return;
 
     const unsubscribe = syncManager.subscribeNotes((remoteNotes) => {
-      setNotes(() => {
-        return remoteNotes.filter((n) => !isNoteEmpty(n) || n.deletedAt);
+      setNotes((prevNotes) => {
+        const merged = mergeNotes(prevNotes, remoteNotes);
+
+        // Instantly write remote synced notes to local disk folders if configured!
+        if (
+          localFolderManager.hasAnyFolderConfigured() &&
+          localFolderManager.getConfig().autoSyncToDisk
+        ) {
+          for (const r of remoteNotes) {
+            if (!isNoteEmpty(r) && !r.deletedAt) {
+              localFolderManager.saveNoteToLocalFolder(r).catch((err) => {
+                console.warn('Auto saving remote synced note to disk error:', err);
+              });
+            } else if (r.deletedAt) {
+              localFolderManager.deleteNoteFromLocalFolder(r).catch(() => {});
+            }
+          }
+        }
+
+        // Keep local IndexedDB backup up to date
+        for (const n of merged) {
+          if (!isNoteEmpty(n)) {
+            saveIndexedDBNote(n).catch(() => {});
+          }
+        }
+
+        return merged.filter((n) => !isNoteEmpty(n) || n.deletedAt);
       });
     });
 
@@ -1198,22 +1277,33 @@ export default function App() {
     setDirectoryHandle(null);
     setDirectoryName('');
 
-    let vercelNotes = await syncManager.loadNotes();
-    if (!vercelNotes || vercelNotes.length === 0) {
-      // Seed initial notes from current state or IndexedDB so user doesn't see a blank list
-      const fallbackNotes = notes.length > 0 ? notes : await getIndexedDBNotes();
-      if (fallbackNotes && fallbackNotes.length > 0) {
-        for (const note of fallbackNotes) {
-          await syncManager.saveNote(note);
+    const vercelNotes = (await syncManager.loadNotes()) || [];
+    const localIdbNotes = await getIndexedDBNotes();
+    let localFolderNotes: Note[] = [];
+    if (localFolderManager.hasAnyFolderConfigured()) {
+      try {
+        localFolderNotes = await localFolderManager.loadAllNotesFromLocalFolders();
+      } catch {}
+    }
+
+    // Merge everything so local notes and vercel notes are visible side-by-side
+    let merged = mergeNotes(notes.length > 0 ? notes : localIdbNotes, localFolderNotes);
+    merged = mergeNotes(merged, vercelNotes);
+
+    for (const note of merged) {
+      if (!isNoteEmpty(note)) {
+        await syncManager.saveNote(note).catch(() => {});
+        await saveIndexedDBNote(note).catch(() => {});
+        if (localFolderManager.hasAnyFolderConfigured() && localFolderManager.getConfig().autoSyncToDisk) {
+          await localFolderManager.saveNoteToLocalFolder(note).catch(() => {});
         }
-        vercelNotes = await syncManager.loadNotes();
       }
     }
 
-    setNotes(vercelNotes);
-    if (vercelNotes.length > 0) {
-      const activeList = vercelNotes.filter((n) => !n.deletedAt);
-      setActiveNoteId(activeList.length > 0 ? activeList[0].id : vercelNotes[0].id);
+    setNotes(merged);
+    if (merged.length > 0) {
+      const activeList = merged.filter((n) => !n.deletedAt);
+      setActiveNoteId(activeList.length > 0 ? activeList[0].id : merged[0].id);
     } else {
       setActiveNoteId(null);
     }
@@ -1559,12 +1649,20 @@ export default function App() {
         onSyncComplete={(msg) => showToast(msg)}
         onNotesUpdated={(updatedNotes) => {
           setNotes((prev) => {
-            const map = new Map(prev.map((n) => [n.id, n]));
-            for (const u of updatedNotes) {
-              map.set(u.id, u);
+            const merged = mergeNotes(prev, updatedNotes);
+            for (const n of updatedNotes) {
+              if (!isNoteEmpty(n)) {
+                saveIndexedDBNote(n).catch(() => {});
+                if (storageMode === 'vercel' || syncManager.isConfigured()) {
+                  syncManager.saveNote(n).catch(() => {});
+                }
+              }
             }
-            return Array.from(map.values());
+            return merged;
           });
+          if (updatedNotes.length > 0 && !activeNoteId) {
+            setActiveNoteId(updatedNotes[0].id);
+          }
         }}
       />
 

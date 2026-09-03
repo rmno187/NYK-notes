@@ -126,6 +126,7 @@ function parseTagsValue(value: string): string[] {
  * Supports both standard notes and blog posts
  */
 export function parseMarkdownNote(rawContent: string, defaultFileName?: string) {
+  let id: string | undefined = undefined;
   let title = '';
   let hasExplicitTitle = false;
   let tags: string[] = [];
@@ -158,7 +159,9 @@ export function parseMarkdownNote(rawContent: string, defaultFileName?: string) 
         const key = line.slice(0, colonIdx).trim().toLowerCase();
         const value = line.slice(colonIdx + 1).trim();
 
-        if (key === 'title') {
+        if (key === 'id') {
+          id = value.replace(/^['"]|['"]$/g, '');
+        } else if (key === 'title') {
           hasExplicitTitle = true;
           title = value.replace(/^['"]|['"]$/g, '');
         } else if (key === 'pinned') {
@@ -312,6 +315,7 @@ export function parseMarkdownNote(rawContent: string, defaultFileName?: string) 
   const combinedTags = Array.from(new Set([...tags, ...inlineTags]));
 
   return {
+    id,
     title,
     tags: combinedTags,
     pinned,

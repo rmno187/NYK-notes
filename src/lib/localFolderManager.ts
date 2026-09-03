@@ -181,7 +181,7 @@ class LocalFolderManager {
   }
 
   // Select Root Content / Repo directory
-  async pickRootDirectory(): Promise<FileSystemDirectoryHandle | null> {
+  async pickRootDirectory(): Promise<{ handle: FileSystemDirectoryHandle; loadedNotes: Note[] } | null> {
     if (typeof window === 'undefined' || !('showDirectoryPicker' in window)) {
       throw new Error('File System Access API is not supported in this browser.');
     }
@@ -199,7 +199,9 @@ class LocalFolderManager {
       await saveHandleToIDB('folder_root', handle);
       this.notify();
 
-      return handle;
+      // Automatically scan and load content from the newly added folder
+      const loadedNotes = await this.loadAllNotesFromLocalFolders();
+      return { handle, loadedNotes };
     } catch (err: any) {
       if (err.name === 'AbortError') return null;
       throw err;
@@ -209,7 +211,7 @@ class LocalFolderManager {
   // Select specific folder for Posts, Projects, or Notes
   async pickCategoryDirectory(
     category: 'posts' | 'projects' | 'notes'
-  ): Promise<FileSystemDirectoryHandle | null> {
+  ): Promise<{ handle: FileSystemDirectoryHandle; loadedNotes: Note[] } | null> {
     if (typeof window === 'undefined' || !('showDirectoryPicker' in window)) {
       throw new Error('File System Access API is not supported in this browser.');
     }
@@ -237,7 +239,10 @@ class LocalFolderManager {
       }
 
       this.notify();
-      return handle;
+
+      // Automatically scan and load content from the newly added folder
+      const loadedNotes = await this.loadAllNotesFromLocalFolders();
+      return { handle, loadedNotes };
     } catch (err: any) {
       if (err.name === 'AbortError') return null;
       throw err;
@@ -574,7 +579,7 @@ class LocalFolderManager {
           }
 
           loadedNotes.push({
-            id: `local-${fileName.replace(/\.md$/, '')}`,
+            id: parsed.id || `local-${fileName.replace(/\.md$/, '')}`,
             title: parsed.title,
             content: parsed.content,
             tags: parsed.tags || [],

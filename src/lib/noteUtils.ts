@@ -129,3 +129,120 @@ export function isNoteEmpty(note: Partial<Note> | null | undefined): boolean {
 
   return cleanTitle === '' && cleanContent === '' && cleanDescription === '';
 }
+
+/**
+ * Intelligently merges an existing notes list with incoming notes (e.g. from Vercel sync or local disk).
+ * Handles matching by id, fileName, slug, or type+title, resolving conflicts by updatedAt timestamp,
+ * and preserving local folder/backup status and image metadata.
+ */
+export function mergeNotes(existingNotes: Note[], incomingNotes: Note[]): Note[] {
+  const result: Note[] = [...existingNotes];
+
+  for (const incoming of incomingNotes) {
+    if (isNoteEmpty(incoming) && !incoming.deletedAt) {
+      continue;
+    }
+
+    // Find if there is a matching existing note
+    const matchIndex = result.findIndex((existing) => {
+      // 1. Exact ID match
+      if (existing.id && incoming.id && existing.id === incoming.id) return true;
+
+      // 2. Exact fileName match
+      if (
+        existing.fileName &&
+        incoming.fileName &&
+        existing.fileName.toLowerCase() === incoming.fileName.toLowerCase()
+      ) {
+        return true;
+      }
+
+      // 3. Project type match by slug
+      if (
+        existing.type === 'project' &&
+        incoming.type === 'project' &&
+        existing.slug &&
+        incoming.slug &&
+        slugify(existing.slug) === slugify(incoming.slug)
+      ) {
+        return true;
+      }
+
+      // 4. Same type, non-empty title, and same date (or neither has date)
+      const exTitle = (existing.title || '').trim().toLowerCase();
+      const inTitle = (incoming.title || '').trim().toLowerCase();
+      if (
+        exTitle &&
+        inTitle &&
+        exTitle === inTitle &&
+        (existing.type || 'note') === (incoming.type || 'note')
+      ) {
+        if (!existing.date && !incoming.date) return true;
+        if (existing.date && incoming.date && existing.date === incoming.date) return true;
+      }
+
+      return false;
+    });
+
+    if (matchIndex >= 0) {
+      const existing = result[matchIndex];
+
+      // Handle deletion status
+      if (incoming.deletedAt && (!existing.deletedAt || incoming.deletedAt >= (existing.updatedAt || 0))) {
+        result[matchIndex] = {
+          ...existing,
+          deletedAt: incoming.deletedAt,
+          updatedAt: Math.max(existing.updatedAt || 0, incoming.updatedAt || 0),
+        };
+        continue;
+      }
+
+      if (existing.deletedAt && (!incoming.deletedAt || existing.deletedAt >= (incoming.updatedAt || 0))) {
+        // Keep existing as deleted
+        continue;
+      }
+
+      // Compare update timestamps
+      const incomingIsNewer = (incoming.updatedAt || 0) > (existing.updatedAt || 0);
+      const base = incomingIsNewer ? incoming : existing;
+      const other = incomingIsNewer ? existing : incoming;
+
+      // Prefer canonical permanent ID if existing had a canonical non-local ID
+      const preferredId =
+        existing.id && !existing.id.startsWith('local-')
+          ? existing.id
+          : incoming.id || existing.id;
+
+      // Combine metadata gracefully
+      result[matchIndex] = {
+        ...base,
+        id: preferredId,
+        fileName: base.fileName || other.fileName,
+        localFolderName: base.localFolderName || other.localFolderName,
+        localBackedUp: Boolean(base.localBackedUp || other.localBackedUp),
+        images: base.images && base.images.length > 0 ? base.images : other.images,
+        tags: Array.from(new Set([...(base.tags || []), ...(other.tags || [])])),
+        pinned: base.pinned ?? other.pinned,
+        featured: base.featured ?? other.featured,
+        type: base.type || other.type || 'note',
+        date: base.date || other.date,
+        author: base.author || other.author,
+        project: base.project || other.project,
+        slug: base.slug || other.slug,
+        description: base.description || other.description,
+        status: base.status || other.status,
+        year: base.year || other.year,
+        url: base.url || other.url,
+        github: base.github || other.github,
+        order: base.order ?? other.order,
+        createdAt: Math.min(existing.createdAt || Date.now(), incoming.createdAt || Date.now()),
+        updatedAt: Math.max(existing.updatedAt || 0, incoming.updatedAt || 0),
+      };
+    } else {
+      // New incoming note
+      result.push(incoming);
+    }
+  }
+
+  return result;
+}
