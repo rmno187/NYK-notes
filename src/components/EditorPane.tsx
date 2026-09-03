@@ -614,12 +614,12 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
             className="w-full text-2xl sm:text-3xl font-extrabold bg-transparent text-neutral-900 dark:text-neutral-100 placeholder-neutral-300 dark:placeholder-neutral-700 focus:outline-none tracking-tight"
           />
 
-          {/* Subtitle / Description Field for Blog mode */}
-          {note.type === 'post' && (
+          {/* Subtitle / Description Field for Blog posts & Projects */}
+          {(note.type === 'post' || note.type === 'project') && (
             <div className="mt-2.5">
               <input
                 type="text"
-                placeholder="Brief summary or subtitle..."
+                placeholder={note.type === 'project' ? 'Project description...' : 'Brief summary or subtitle...'}
                 value={note.description || ''}
                 onChange={(e) => onChangeDescription?.(e.target.value)}
                 onKeyDown={(e) => {
@@ -707,6 +707,7 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
         allTags={allTags}
         onAddTag={onAddTag}
         onRemoveTag={onRemoveTag}
+        onChangeDescription={onChangeDescription}
         onChangeAuthor={onChangeAuthor}
         allAuthors={allAuthors}
         onChangeProject={onChangeProject}

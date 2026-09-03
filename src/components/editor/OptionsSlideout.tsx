@@ -10,6 +10,7 @@ interface OptionsSlideoutProps {
   allTags: string[];
   onAddTag: (tag: string) => void;
   onRemoveTag: (tag: string) => void;
+  onChangeDescription?: (description: string) => void;
   onChangeAuthor?: (author: string) => void;
   allAuthors?: string[];
   onChangeProject?: (project: string) => void;
@@ -51,6 +52,7 @@ export const OptionsSlideout: React.FC<OptionsSlideoutProps> = ({
   allTags,
   onAddTag,
   onRemoveTag,
+  onChangeDescription,
   onChangeAuthor,
   allAuthors = [],
   onChangeProject,
@@ -109,6 +111,10 @@ export const OptionsSlideout: React.FC<OptionsSlideoutProps> = ({
   const projectInputRef = useRef<HTMLInputElement>(null);
 
   // Project fields state (when Note is a Project)
+  const [isEditingDescription, setIsEditingDescription] = useState(false);
+  const [descriptionInput, setDescriptionInput] = useState('');
+  const descriptionInputRef = useRef<HTMLInputElement>(null);
+
   const [isEditingSlug, setIsEditingSlug] = useState(false);
   const [slugInput, setSlugInput] = useState('');
   const slugInputRef = useRef<HTMLInputElement>(null);
@@ -147,6 +153,9 @@ export const OptionsSlideout: React.FC<OptionsSlideoutProps> = ({
     setProjectInput('');
     setIsProjectDropdownOpen(false);
 
+    setIsEditingDescription(false);
+    setDescriptionInput('');
+
     setIsEditingSlug(false);
     setSlugInput('');
 
@@ -184,6 +193,10 @@ export const OptionsSlideout: React.FC<OptionsSlideoutProps> = ({
   useEffect(() => {
     if (isAddingProject && projectInputRef.current) projectInputRef.current.focus();
   }, [isAddingProject]);
+
+  useEffect(() => {
+    if (isEditingDescription && descriptionInputRef.current) descriptionInputRef.current.focus();
+  }, [isEditingDescription]);
 
   useEffect(() => {
     if (isEditingSlug && slugInputRef.current) slugInputRef.current.focus();
@@ -283,6 +296,12 @@ export const OptionsSlideout: React.FC<OptionsSlideoutProps> = ({
     setProjectInput('');
     setIsAddingProject(false);
     setIsProjectDropdownOpen(false);
+  };
+
+  const handleSaveDescription = () => {
+    onChangeDescription?.(descriptionInput.trim());
+    setIsEditingDescription(false);
+    setDescriptionInput('');
   };
 
   const handleSaveSlug = () => {
@@ -795,6 +814,59 @@ export const OptionsSlideout: React.FC<OptionsSlideoutProps> = ({
               {/* PROJECT TYPE FIELDS */}
               {note.type === 'project' && (
                 <>
+                  {/* DESCRIPTION */}
+                  <div className="group flex items-center justify-between py-2.5 min-h-[38px]">
+                    <span className="text-sm text-black dark:text-white">Description</span>
+
+                    {!isEditingDescription ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setDescriptionInput(note.description || '');
+                          setIsEditingDescription(true);
+                        }}
+                        className={`text-xs transition-colors hover:underline underline-offset-2 max-w-[160px] truncate ${
+                          note.description
+                            ? 'text-black dark:text-white font-medium'
+                            : 'text-neutral-400 dark:text-neutral-600 hover:text-black dark:hover:text-white'
+                        }`}
+                      >
+                        {note.description || 'Add description'}
+                      </button>
+                    ) : (
+                      <div className="relative flex items-center">
+                        <input
+                          ref={descriptionInputRef}
+                          type="text"
+                          placeholder="Project description..."
+                          value={descriptionInput}
+                          onChange={(e) => setDescriptionInput(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              handleSaveDescription();
+                            } else if (e.key === 'Escape') {
+                              setIsEditingDescription(false);
+                              setDescriptionInput('');
+                            }
+                          }}
+                          className="bg-transparent border-b border-black dark:border-white py-0.5 pr-5 text-xs text-black dark:text-white placeholder-neutral-400 dark:placeholder-neutral-600 focus:outline-none w-36 sm:w-52 text-right transition-colors"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsEditingDescription(false);
+                            setDescriptionInput('');
+                          }}
+                          className="absolute right-0 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-black dark:hover:text-white"
+                          title="Cancel"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
                   {/* SLUG */}
                   <div className="group flex items-center justify-between py-2.5 min-h-[38px]">
                     <span className="text-sm text-black dark:text-white">Slug</span>

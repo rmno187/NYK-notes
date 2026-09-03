@@ -567,28 +567,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                       {trashedNotes.length}
                     </span>
                   </button>
-
-                  {/* LOCAL FOLDER SYNC */}
-                  {onOpenLocalFolderSyncModal && (
-                    <div className="pt-1 border-t border-neutral-100 dark:border-neutral-800">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setIsFolderDropdownOpen(false);
-                          onOpenLocalFolderSyncModal();
-                        }}
-                        className="w-full px-3 py-2 text-left flex items-center justify-between text-xs text-neutral-600 dark:text-neutral-400 hover:text-black dark:hover:text-white hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors"
-                      >
-                        <div className="flex items-center space-x-2">
-                          <HardDrive className="w-3.5 h-3.5" />
-                          <span>Local Folder Sync</span>
-                        </div>
-                        {isLocalFolderConfigured && (
-                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" title="Connected" />
-                        )}
-                      </button>
-                    </div>
-                  )}
+                  
                 </div>
               )}
             </div>
@@ -668,29 +647,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 </button>
               )}
             </div>
-
-            {/* Local Folder Sync trigger / indicator */}
-            {onOpenLocalFolderSyncModal && (
-              <button
-                type="button"
-                onClick={onOpenLocalFolderSyncModal}
-                className={`p-1 rounded transition-colors text-xs flex items-center gap-1 ${
-                  isLocalFolderConfigured
-                    ? 'text-neutral-700 dark:text-neutral-300 hover:text-black dark:hover:text-white'
-                    : 'text-neutral-400 hover:text-black dark:hover:text-white'
-                }`}
-                title={
-                  isLocalFolderConfigured
-                    ? 'Local Blog Repo Folder connected. Click to manage sync.'
-                    : 'Connect Local Blog Folders (Posts, Projects, Notes)'
-                }
-              >
-                <HardDrive className="w-3.5 h-3.5" />
-                {isLocalFolderConfigured && (
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
-                )}
-              </button>
-            )}
 
             {/* Sync status indicator if Vercel Sync is active or configured */}
             {storageMode === 'vercel' && onOpenSyncModal && (
