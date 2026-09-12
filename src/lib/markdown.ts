@@ -16,6 +16,24 @@ const turndown = new TurndownService({
   strongDelimiter: '**',
 });
 
+// Add rule for strikethrough in Turndown
+turndown.addRule('strikethrough', {
+  filter: ['s', 'del', 's' as any],
+  replacement: (content) => `~~${content}~~`,
+});
+
+// Add rule for highlight/mark in Turndown
+turndown.addRule('highlight', {
+  filter: 'mark',
+  replacement: (content) => `==${content}==`,
+});
+
+// Add rule for horizontal rule in Turndown
+turndown.addRule('hr', {
+  filter: 'hr',
+  replacement: () => '\n\n---\n\n',
+});
+
 // Add rule for images in Turndown to preserve relative paths
 turndown.addRule('images', {
   filter: 'img',
@@ -37,6 +55,35 @@ turndown.addRule('underline', {
   replacement: (content) => `<u>${content}</u>`,
 });
 
+// Add rule for blockquotes to preserve empty and non-empty blockquotes
+turndown.addRule('blockquote', {
+  filter: 'blockquote',
+  replacement: (content, node) => {
+    const el = node as HTMLElement;
+    const innerText = el.textContent?.replace(/[\r\n\s\u00A0\u200B-\u200D\uFEFF]/g, '') || '';
+    if (!innerText) {
+      return '\n\n> \n\n';
+    }
+    const cleanContent = content.trim().replace(/^/gm, '> ');
+    return '\n\n' + cleanContent + '\n\n';
+  },
+});
+
+// Add rule for headings to preserve empty headings
+turndown.addRule('headings', {
+  filter: ['h1', 'h2', 'h3', 'h4', 'h5', 'h6'],
+  replacement: (content, node) => {
+    const level = Number(node.nodeName.charAt(1)) || 1;
+    const prefix = '#'.repeat(level);
+    const el = node as HTMLElement;
+    const innerText = el.textContent?.replace(/[\r\n\s\u00A0\u200B-\u200D\uFEFF]/g, '') || '';
+    if (!innerText) {
+      return '\n\n' + prefix + ' \n\n';
+    }
+    return '\n\n' + prefix + ' ' + content.trim() + '\n\n';
+  },
+});
+
 // Add rule to preserve empty paragraphs / blank lines in Turndown
 turndown.addRule('emptyParagraphs', {
   filter: (node) => {
@@ -55,7 +102,46 @@ turndown.addRule('taskListInputs', {
     return node.nodeName === 'INPUT' && (node as HTMLInputElement).type === 'checkbox';
   },
   replacement: (_content, node) => {
-    return (node as HTMLInputElement).checked ? '[x] ' : '[ ] ';
+    const el = node as HTMLInputElement;
+    const isChecked = el.checked || el.hasAttribute('checked') || el.defaultChecked;
+    return isChecked ? '[x] ' : '[ ] ';
+  },
+});
+
+// Add rule for task list items and empty list items
+turndown.addRule('taskListItem', {
+  filter: (node) => {
+    if (node.nodeName !== 'LI') return false;
+    const el = node as HTMLElement;
+    const hasTaskClass = Boolean(el.classList?.contains('task-list-item'));
+    const hasCheckbox = Boolean(el.querySelector?.('input[type="checkbox"]'));
+    return hasTaskClass || hasCheckbox;
+  },
+  replacement: (content, node) => {
+    const el = node as HTMLElement;
+    const cb = el.querySelector?.('input[type="checkbox"]') as HTMLInputElement | null;
+    const isChecked = Boolean(cb && (cb.checked || cb.hasAttribute('checked') || cb.defaultChecked));
+    const prefix = isChecked ? '- [x] ' : '- [ ] ';
+    const cleanContent = content.replace(/^\[[ x_]?\]\s*/i, '').trim();
+    const lines = cleanContent.split('\n');
+    const formatted = lines.map((l, idx) => (idx === 0 ? l : '      ' + l.trimStart())).join('\n');
+    return prefix + formatted + '\n';
+  },
+});
+
+turndown.addRule('emptyListItems', {
+  filter: (node) => {
+    if (node.nodeName !== 'LI') return false;
+    const el = node as HTMLElement;
+    const innerText = el.textContent?.replace(/[\r\n\s\u00A0\u200B-\u200D\uFEFF]/g, '') || '';
+    const hasTaskClass = Boolean(el.classList?.contains('task-list-item'));
+    const hasCheckbox = Boolean(el.querySelector?.('input[type="checkbox"]'));
+    return innerText === '' && !hasTaskClass && !hasCheckbox;
+  },
+  replacement: (_content, node) => {
+    const el = node as HTMLElement;
+    const isOl = el.parentElement?.nodeName === 'OL';
+    return isOl ? '1. \n' : '- \n';
   },
 });
 
@@ -450,7 +536,13 @@ export function renderMarkdownToHtml(markdownContent: string, images?: NoteImage
     return '\n\n' + '<br>\n\n'.repeat(extraNewlines.length);
   });
 
+  // Normalize shorthand markdown task lists e.g. "[ ] Task" or "[x] Task" without leading bullet into "- [ ] Task" or "- [x] Task"
+  cleanMarkdown = cleanMarkdown.replace(/^([ \t]*)\[([ x_])\]([ \t]+)/gim, '$1- [$2]$3');
+
   try {
+    // Pre-process ==highlight== syntax before markdown parsing
+    cleanMarkdown = cleanMarkdown.replace(/==([^=\n]+)==/g, '<mark class="bg-amber-100 dark:bg-amber-900/40 px-1 rounded">$1</mark>');
+
     let rawHtml = marked.parse(cleanMarkdown) as string;
 
     // Resolve images: if images array is provided, map relative src to dataUrl and add data-relative-path
@@ -481,15 +573,19 @@ export function renderMarkdownToHtml(markdownContent: string, images?: NoteImage
       });
     }
 
-    // 1. Remove disabled attribute from checkbox inputs so they can be clicked/toggled
+    // 1. Remove disabled attribute from checkbox inputs and add contenteditable="false" so they can be clicked/toggled reliably
     // 2. Strip inline style attributes from raw tags to prevent dark mode color issues
     // 3. Strip deprecated <font> tags
-    // 4. Ensure empty <p></p> tags have <br> inside so they maintain paragraph line height
+    // 4. Ensure empty tags have <br> or <p><br></p> inside so they maintain block height and editable state
     return rawHtml
-      .replace(/<input([^>]*)\sdisabled=""([^>]*)>/gi, '<input$1$2>')
-      .replace(/<input([^>]*)\sdisabled([^>]*)>/gi, '<input$1$2>')
+      .replace(/<input([^>]*)\sdisabled=""([^>]*)>/gi, '<input$1$2 contenteditable="false">')
+      .replace(/<input([^>]*)\sdisabled([^>]*)>/gi, '<input$1$2 contenteditable="false">')
+      .replace(/<input\s+type="checkbox"(?![^>]*contenteditable)/gi, '<input type="checkbox" contenteditable="false"')
       .replace(/<\/?font[^>]*>/gi, '')
       .replace(/\sstyle="[^"]*"/gi, '')
+      .replace(/<blockquote>\s*(?:<p>\s*<\/p>)?\s*<\/blockquote>/gi, '<blockquote><p><br></p></blockquote>')
+      .replace(/<h([1-6])>\s*<\/h$1>/gi, '<h$1><br></h$1>')
+      .replace(/<li>\s*<\/li>/gi, '<li><br></li>')
       .replace(/<p>\s*<\/p>/gi, '<p><br></p>');
   } catch (err) {
     return `<p class="text-red-500">Error rendering Markdown</p>`;
@@ -521,7 +617,7 @@ export function applyFormatting(
   text: string,
   selectionStart: number,
   selectionEnd: number,
-  type: 'bold' | 'italic' | 'underline' | 'heading' | 'h2' | 'paragraph' | 'code' | 'quote' | 'link' | 'bullet' | 'number' | 'task' | 'table' | 'hr'
+  type: 'bold' | 'italic' | 'underline' | 'strike' | 'clear' | 'heading' | 'h2' | 'paragraph' | 'code' | 'quote' | 'link' | 'bullet' | 'number' | 'task' | 'table' | 'hr'
 ): { text: string; newStart: number; newEnd: number } {
   const before = text.slice(0, selectionStart);
   const selected = text.slice(selectionStart, selectionEnd) || 'text';
@@ -555,6 +651,41 @@ export function applyFormatting(
       cursorOffsetStart = selectionStart + 3;
       cursorOffsetEnd = selectionEnd + 3;
       break;
+    case 'strike':
+      prefix = '~~';
+      suffix = '~~';
+      if (selected.startsWith('~~') && selected.endsWith('~~') && selected.length >= 4) {
+        newText = before + selected.slice(2, -2) + after;
+        cursorOffsetStart = selectionStart;
+        cursorOffsetEnd = selectionEnd - 4;
+      } else {
+        newText = before + prefix + selected + suffix + after;
+        cursorOffsetStart = selectionStart + 2;
+        cursorOffsetEnd = selectionEnd + 2;
+      }
+      break;
+    case 'clear': {
+      // Clear both inline and block markdown formatting within selection
+      let cleaned = selected
+        .replace(/\*\*(.*?)\*\*/g, '$1')
+        .replace(/__(.*?)__/g, '$1')
+        .replace(/\*(.*?)\*/g, '$1')
+        .replace(/_(.*?)_/g, '$1')
+        .replace(/~~(.*?)~~/g, '$1')
+        .replace(/==(.*?)==/g, '$1')
+        .replace(/<u>(.*?)<\/u>/gi, '$1')
+        .replace(/<del>(.*?)<\/del>/gi, '$1')
+        .replace(/<s>(.*?)<\/s>/gi, '$1')
+        .replace(/`([^`]+)`/g, '$1')
+        .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1');
+
+      cleaned = cleaned.replace(/^\s*(?:-\s*\[[\s\S]?\]\s*|\[[\s\S]?\]\s*|[-*+•]\s*|\d+\.\s*|>\s*|#{1,6}\s*)/gm, '');
+
+      newText = before + cleaned + after;
+      cursorOffsetStart = selectionStart;
+      cursorOffsetEnd = selectionStart + cleaned.length;
+      break;
+    }
     case 'code':
       if (selected.includes('\n')) {
         prefix = '```\n';

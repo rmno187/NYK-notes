@@ -1,19 +1,22 @@
 import { BackupData, EncryptedBackupPayload } from '../types';
 
-// Utility functions for converting ArrayBuffers to Base64 strings
+// Utility functions for converting ArrayBuffers to Base64 strings safely without stack overflow or GC thrashing
 function bufferToBase64(buffer: ArrayBuffer): string {
   const bytes = new Uint8Array(buffer);
+  const CHUNK_SIZE = 0x8000; // 32KB
   let binary = '';
-  for (let i = 0; i < bytes.byteLength; i++) {
-    binary += String.fromCharCode(bytes[i]);
+  for (let i = 0; i < bytes.length; i += CHUNK_SIZE) {
+    const chunk = bytes.subarray(i, i + CHUNK_SIZE);
+    binary += String.fromCharCode.apply(null, chunk as unknown as number[]);
   }
   return window.btoa(binary);
 }
 
 function base64ToBuffer(base64: string): ArrayBuffer {
   const binary = window.atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) {
+  const len = binary.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i++) {
     bytes[i] = binary.charCodeAt(i);
   }
   return bytes.buffer;

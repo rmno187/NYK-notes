@@ -19,7 +19,7 @@ export const ShortcutsModal: React.FC<ShortcutsModalProps> = ({ isOpen, onClose 
     { combination: 'Ctrl/Cmd + Shift + D', description: 'Dark/Light', key: 'd', category: 'General' },
     { combination: 'Ctrl/Cmd + Shift + B', description: 'Encrypted Backup', key: 'b', category: 'General' },
 
-    { combination: 'Ctrl/Cmd + E', description: 'Editor/Markdown', key: 'e', category: 'Navigation' },
+    { combination: 'Ctrl/Cmd + E', description: 'Toggle WYSIWYG / Markdown', key: 'e', category: 'Navigation' },
     { combination: 'Esc', description: 'Close/Clear', key: 'Escape', category: 'Navigation' },
     { combination: 'Shift + ?', description: 'Shortcuts', key: '?', category: 'Navigation' },
 
@@ -27,6 +27,10 @@ export const ShortcutsModal: React.FC<ShortcutsModalProps> = ({ isOpen, onClose 
     { combination: 'Ctrl/Cmd + Shift + Z', description: 'Redo', key: 'z', category: 'Editing' },
     { combination: 'Ctrl/Cmd + B', description: 'Bold', key: 'b', category: 'Editing' },
     { combination: 'Ctrl/Cmd + I', description: 'Italic', key: 'i', category: 'Editing' },
+    { combination: 'Ctrl/Cmd + Shift + X', description: 'Strikethrough', key: 'x', category: 'Editing' },
+    { combination: 'Ctrl/Cmd + \\', description: 'Clear Formatting', key: '\\', category: 'Editing' },
+    { combination: 'Enter', description: 'New list item (in lists)', key: 'Enter', category: 'Editing' },
+    { combination: 'Shift + Enter', description: 'Continue on new line within list item', key: 'Enter', category: 'Editing' },
     { combination: 'Tab / Shift+Tab', description: 'Indent/Outdent', key: 'Tab', category: 'Editing' },
   ];
 

@@ -91,6 +91,7 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
     bold: false,
     italic: false,
     underline: false,
+    strike: false,
     heading: false,
     h2: false,
     bullet: false,
@@ -112,7 +113,7 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
 
   // History stack for exact granular Undo/Redo
   const historyRef = useRef<HistoryItem[]>([
-    { content: note.content, selStart: 0, selEnd: 0, html: renderMarkdownToHtml(note.content, note.images) },
+    { content: note.content, selStart: 0, selEnd: 0, html: undefined },
   ]);
   const historyIdxRef = useRef<number>(0);
   const isUndoRedoActionRef = useRef<boolean>(false);
@@ -126,50 +127,75 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
           content: note.content,
           selStart: 0,
           selEnd: 0,
-          html: renderMarkdownToHtml(note.content, note.images),
+          html: undefined,
         },
       ];
       historyIdxRef.current = 0;
     }
-  }, [note.id, note.content, note.images]);
+  }, [note.id]);
+
+  const historyDebounceTimer = useRef<NodeJS.Timeout | null>(null);
 
   const pushHistory = useCallback(
-    (newContent: string, selStart?: number, selEnd?: number, customHtml?: string) => {
+    (newContent: string, selStart?: number, selEnd?: number, customHtml?: string, immediate = false) => {
       if (isUndoRedoActionRef.current) return;
       const current = historyRef.current[historyIdxRef.current];
       if (current && current.content === newContent) return;
 
-      let sStart = selStart;
-      let sEnd = selEnd;
-      if (sStart === undefined || sEnd === undefined) {
-        if (mode === 'markdown' && textareaRef.current) {
-          sStart = textareaRef.current.selectionStart;
-          sEnd = textareaRef.current.selectionEnd;
-        } else if (mode === 'wysiwyg' && wysiwygRef.current) {
-          const offset = getCaretCharacterOffsetWithin(wysiwygRef.current);
-          sStart = offset;
-          sEnd = offset;
-        } else {
-          sStart = newContent.length;
-          sEnd = newContent.length;
+      const performPush = () => {
+        let sStart = selStart;
+        let sEnd = selEnd;
+        if (sStart === undefined || sEnd === undefined) {
+          if (mode === 'markdown' && textareaRef.current) {
+            sStart = textareaRef.current.selectionStart;
+            sEnd = textareaRef.current.selectionEnd;
+          } else {
+            sStart = 0;
+            sEnd = 0;
+          }
         }
+
+        const htmlToStore = customHtml || (wysiwygRef.current ? wysiwygRef.current.innerHTML : undefined);
+
+        const trimmed = historyRef.current.slice(0, historyIdxRef.current + 1);
+        trimmed.push({
+          content: newContent,
+          selStart: sStart,
+          selEnd: sEnd,
+          html: htmlToStore,
+        });
+        if (trimmed.length > 50) trimmed.shift();
+        historyRef.current = trimmed;
+        historyIdxRef.current = trimmed.length - 1;
+      };
+
+      if (immediate) {
+        if (historyDebounceTimer.current) {
+          clearTimeout(historyDebounceTimer.current);
+          historyDebounceTimer.current = null;
+        }
+        performPush();
+      } else {
+        if (historyDebounceTimer.current) {
+          clearTimeout(historyDebounceTimer.current);
+        }
+        historyDebounceTimer.current = setTimeout(() => {
+          historyDebounceTimer.current = null;
+          performPush();
+        }, 600);
       }
-
-      const htmlToStore = customHtml || (wysiwygRef.current ? wysiwygRef.current.innerHTML : undefined);
-
-      const trimmed = historyRef.current.slice(0, historyIdxRef.current + 1);
-      trimmed.push({
-        content: newContent,
-        selStart: sStart,
-        selEnd: sEnd,
-        html: htmlToStore,
-      });
-      if (trimmed.length > 500) trimmed.shift();
-      historyRef.current = trimmed;
-      historyIdxRef.current = trimmed.length - 1;
     },
     [mode]
   );
+
+  useEffect(() => {
+    return () => {
+      if (historyDebounceTimer.current) {
+        clearTimeout(historyDebounceTimer.current);
+        historyDebounceTimer.current = null;
+      }
+    };
+  }, [note.id]);
 
   const prevNoteIdForHtmlRef = useRef<string>(note.id);
 
@@ -188,13 +214,48 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
     }
   }, [note.id, note.content, note.images, mode]);
 
-  // Auto-expand textarea height in Markdown mode
-  useEffect(() => {
-    if (mode === 'markdown' && textareaRef.current) {
-      textareaRef.current.style.height = 'auto';
-      textareaRef.current.style.height = `${Math.max(350, textareaRef.current.scrollHeight)}px`;
+  // Auto-expand textarea height in Markdown mode safely without layout oscillation
+  const isAdjustingRef = useRef(false);
+  const lastObservedWidthRef = useRef<number>(0);
+
+  const adjustTextareaHeight = useCallback(() => {
+    const el = textareaRef.current;
+    if (!el || isAdjustingRef.current) return;
+    isAdjustingRef.current = true;
+    try {
+      // Use 'auto' instead of '0px' to prevent scrollbar toggle jitter and ResizeObserver oscillation
+      el.style.height = 'auto';
+      const newHeight = Math.max(350, el.scrollHeight);
+      el.style.height = `${newHeight}px`;
+    } finally {
+      isAdjustingRef.current = false;
     }
-  }, [note.content, mode]);
+  }, []);
+
+  useEffect(() => {
+    if (mode === 'markdown') {
+      adjustTextareaHeight();
+      const raf = requestAnimationFrame(adjustTextareaHeight);
+      return () => cancelAnimationFrame(raf);
+    }
+  }, [note.id, note.content, mode, adjustTextareaHeight]);
+
+  // Adjust on container resize ONLY when horizontal container width actually changes
+  useEffect(() => {
+    if (mode !== 'markdown' || !contentScrollRef.current) return;
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const width = Math.round(entry.contentRect.width);
+        // Only adjust if horizontal width changed by at least 4px (window resize or drawer toggle)
+        if (Math.abs(width - lastObservedWidthRef.current) >= 4) {
+          lastObservedWidthRef.current = width;
+          adjustTextareaHeight();
+        }
+      }
+    });
+    observer.observe(contentScrollRef.current);
+    return () => observer.disconnect();
+  }, [mode, adjustTextareaHeight]);
 
   const updateSelectionState = useCallback(() => {
     if (mode === 'wysiwyg') {
@@ -596,7 +657,27 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
       {/* Content Area: Title + WYSIWYG or Raw Markdown */}
       <div
         ref={contentScrollRef}
-        className="flex-1 p-4 sm:p-6 overflow-y-auto relative min-w-0 w-full flex flex-col"
+        onClick={(e) => {
+          // If clicked in the empty bottom scroll padding area below the editor content, place caret at the end
+          if (e.target === contentScrollRef.current) {
+            if (mode === 'wysiwyg' && wysiwygRef.current) {
+              wysiwygRef.current.focus();
+              const sel = window.getSelection();
+              if (sel) {
+                const range = document.createRange();
+                range.selectNodeContents(wysiwygRef.current);
+                range.collapse(false);
+                sel.removeAllRanges();
+                sel.addRange(range);
+              }
+            } else if (mode === 'markdown' && textareaRef.current) {
+              textareaRef.current.focus();
+              const len = textareaRef.current.value.length;
+              textareaRef.current.setSelectionRange(len, len);
+            }
+          }
+        }}
+        className="flex-1 p-4 sm:p-6 pb-28 sm:pb-36 overflow-y-auto [scrollbar-gutter:stable] relative min-w-0 w-full flex flex-col"
       >
         {/* Title */}
         <div className="mb-4 pb-2 border-b border-neutral-100 dark:border-neutral-900 shrink-0">
@@ -647,7 +728,7 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
             onTouchEnd={updateSelectionState}
             onSelect={updateSelectionState}
             onPaste={handleWysiwygPaste}
-            className="editor-wysiwyg w-full min-h-[350px] outline-none text-neutral-900 dark:text-neutral-100"
+            className="editor-wysiwyg flex-1 w-full min-h-[350px] outline-none text-neutral-900 dark:text-neutral-100 pb-16"
           />
         ) : (
           <textarea
@@ -656,14 +737,16 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
             onChange={(e) => {
               pushHistory(e.target.value, e.target.selectionStart, e.target.selectionEnd);
               onChangeContent(e.target.value);
+              adjustTextareaHeight();
             }}
+            onInput={adjustTextareaHeight}
             onKeyDown={handleMarkdownKeyDown}
             onKeyUp={updateSelectionState}
             onMouseUp={updateSelectionState}
             onTouchEnd={updateSelectionState}
             onSelect={updateSelectionState}
             placeholder="Type raw markdown here..."
-            className="w-full min-h-[350px] resize-none bg-transparent text-neutral-900 dark:text-neutral-100 placeholder-neutral-400 dark:placeholder-neutral-600 font-mono text-sm leading-relaxed focus:outline-none overflow-hidden"
+            className="w-full min-h-[350px] resize-none bg-transparent text-neutral-900 dark:text-neutral-100 placeholder-neutral-400 dark:placeholder-neutral-600 font-mono text-sm leading-relaxed focus:outline-none shrink-0"
           />
         )}
       </div>

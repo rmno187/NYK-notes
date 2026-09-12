@@ -29,7 +29,7 @@ import {
 import { getIndexedDBNotes } from '../storage';
 
 export type SyncStatusListener = (status: SyncStatus, lastSyncedAt?: number, errorMessage?: string | null) => void;
-export type SyncNotesListener = (updatedNotes: Note[]) => void;
+export type SyncNotesListener = (updatedNotes: Note[], changedNotes?: Note[]) => void;
 
 class VercelSyncManager {
   private encryptionKey: CryptoKey | null = null;
@@ -39,6 +39,8 @@ class VercelSyncManager {
   private lastErrorMessage: string | null = null;
   private syncTimer: number | null = null;
   private isSyncing = false;
+  private pendingPushDebounceTimers = new Map<string, number>();
+  private pendingNotesToPush = new Map<string, Note>();
 
   private statusListeners = new Set<SyncStatusListener>();
   private notesListeners = new Set<SyncNotesListener>();
@@ -299,20 +301,60 @@ class VercelSyncManager {
     return valid;
   }
 
-  // Save note locally, encrypt, and push/queue for sync
-  public async saveNote(note: Note): Promise<void> {
+  // Save note locally, encrypt, and push/queue for sync (with intelligent debouncing)
+  public async saveNote(note: Note, immediate = false): Promise<void> {
     // If the note is empty and not deleted, never save to cache or sync to server
     if (isNoteEmpty(note) && !note.deletedAt) {
+      this.cancelPendingPush(note.id);
       await deleteVercelCacheNote(note.id);
       return;
     }
 
+    // Save to local cache immediately for zero latency
     await saveVercelCacheNote(note);
 
     if (!this.encryptionKey || !this.authKeyHex) {
       return;
     }
 
+    if (immediate) {
+      this.cancelPendingPush(note.id);
+      await this.encryptAndPushNote(note);
+    } else {
+      // Debounce push while user is actively typing
+      this.cancelPendingPush(note.id);
+      this.pendingNotesToPush.set(note.id, note);
+      const timer = window.setTimeout(async () => {
+        this.pendingPushDebounceTimers.delete(note.id);
+        const pendingNote = this.pendingNotesToPush.get(note.id);
+        this.pendingNotesToPush.delete(note.id);
+        if (pendingNote) {
+          await this.encryptAndPushNote(pendingNote);
+        }
+      }, 1200);
+      this.pendingPushDebounceTimers.set(note.id, timer);
+    }
+  }
+
+  private cancelPendingPush(noteId: string) {
+    const existing = this.pendingPushDebounceTimers.get(noteId);
+    if (existing) {
+      clearTimeout(existing);
+      this.pendingPushDebounceTimers.delete(noteId);
+    }
+    this.pendingNotesToPush.delete(noteId);
+  }
+
+  public async flushPendingPushes(): Promise<void> {
+    const entries = Array.from(this.pendingNotesToPush.entries());
+    for (const [noteId, note] of entries) {
+      this.cancelPendingPush(noteId);
+      await this.encryptAndPushNote(note);
+    }
+  }
+
+  private async encryptAndPushNote(note: Note): Promise<void> {
+    if (!this.encryptionKey || !this.authKeyHex) return;
     try {
       const envelope = await encryptNote(note, this.encryptionKey);
 
@@ -322,7 +364,7 @@ class VercelSyncManager {
         return;
       }
 
-      this.pushSingleChange(envelope);
+      await this.pushSingleChange(envelope);
     } catch (err) {
       console.error('Failed to encrypt note for sync:', err);
     }
@@ -330,6 +372,7 @@ class VercelSyncManager {
 
   // Delete note locally and send tombstone
   public async deleteNote(id: string): Promise<void> {
+    this.cancelPendingPush(id);
     const existing = (await getVercelCacheNotes()).find((n) => n.id === id);
     await deleteVercelCacheNote(id);
 
@@ -351,7 +394,7 @@ class VercelSyncManager {
     if (!navigator.onLine) {
       await queuePendingPush(envelope);
     } else {
-      this.pushSingleChange(envelope);
+      await this.pushSingleChange(envelope);
     }
   }
 
@@ -451,15 +494,18 @@ class VercelSyncManager {
           const localNotes = await getVercelCacheNotes();
           const localMap = new Map(localNotes.map((n) => [n.id, n]));
           let hasChanges = false;
+          const changedNotes: Note[] = [];
 
           for (const envelope of remoteEnvelopes) {
             const local = localMap.get(envelope.noteId);
-            if (local && local.updatedAt > envelope.updatedAt) {
+            // If local is already up to date or newer, skip decryption and cache write
+            if (local && local.updatedAt >= envelope.updatedAt) {
               continue;
             }
 
             const decrypted = await decryptNote(envelope, this.encryptionKey);
             if (decrypted) {
+              changedNotes.push(decrypted);
               if (isNoteEmpty(decrypted) && !decrypted.deletedAt) {
                 await deleteVercelCacheNote(decrypted.id);
                 localMap.delete(decrypted.id);
@@ -473,8 +519,8 @@ class VercelSyncManager {
           }
 
           const allWorking = Array.from(localMap.values()).filter((n) => !isNoteEmpty(n) || n.deletedAt);
-          if (hasChanges || localNotes.length === 0) {
-            this.notesListeners.forEach((l) => l(allWorking));
+          if (hasChanges || (localNotes.length === 0 && allWorking.length > 0)) {
+            this.notesListeners.forEach((l) => l(allWorking, changedNotes));
           }
         }
 
@@ -548,15 +594,18 @@ class VercelSyncManager {
         const localNotes = await getVercelCacheNotes();
         const localMap = new Map(localNotes.map((n) => [n.id, n]));
         let hasChanges = false;
+        const changedNotes: Note[] = [];
 
         for (const envelope of remoteEnvelopes) {
           const local = localMap.get(envelope.noteId);
-          if (local && local.updatedAt > envelope.updatedAt) {
+          // If local is already up to date or newer, skip decryption and cache write
+          if (local && local.updatedAt >= envelope.updatedAt) {
             continue;
           }
 
           const decrypted = await decryptNote(envelope, this.encryptionKey);
           if (decrypted) {
+            changedNotes.push(decrypted);
             if (isNoteEmpty(decrypted) && !decrypted.deletedAt) {
               await deleteVercelCacheNote(decrypted.id);
               localMap.delete(decrypted.id);
@@ -570,8 +619,8 @@ class VercelSyncManager {
         }
 
         const allWorking = Array.from(localMap.values()).filter((n) => !isNoteEmpty(n) || n.deletedAt);
-        if (hasChanges || localNotes.length === 0) {
-          this.notesListeners.forEach((l) => l(allWorking));
+        if (hasChanges || (localNotes.length === 0 && allWorking.length > 0)) {
+          this.notesListeners.forEach((l) => l(allWorking, changedNotes));
         }
       }
 
@@ -594,7 +643,7 @@ class VercelSyncManager {
       if (this.isConfigured() && navigator.onLine) {
         this.sync();
       }
-    }, 30_000);
+    }, 60_000);
 
     window.addEventListener('focus', this.onWindowFocus);
   }

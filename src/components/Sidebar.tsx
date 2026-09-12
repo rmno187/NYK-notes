@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import {
   FileText,
   Plus,
@@ -134,70 +134,117 @@ export const Sidebar: React.FC<SidebarProps> = ({
     };
   }, []);
 
-  const activeNotes = notes.filter((n) => !n.deletedAt && (!n.type || n.type === 'note') && !isNoteEmpty(n));
-  const blogNotes = notes.filter((n) => !n.deletedAt && n.type === 'post' && !isNoteEmpty(n));
-  const projectNotes = notes.filter((n) => !n.deletedAt && n.type === 'project' && !isNoteEmpty(n));
-  const trashedNotes = notes.filter((n) => Boolean(n.deletedAt));
+  const activeNotes = useMemo(
+    () => notes.filter((n) => !n.deletedAt && (!n.type || n.type === 'note') && !isNoteEmpty(n)),
+    [notes]
+  );
+  const blogNotes = useMemo(
+    () => notes.filter((n) => !n.deletedAt && n.type === 'post' && !isNoteEmpty(n)),
+    [notes]
+  );
+  const projectNotes = useMemo(
+    () => notes.filter((n) => !n.deletedAt && n.type === 'project' && !isNoteEmpty(n)),
+    [notes]
+  );
+  const trashedNotes = useMemo(
+    () => notes.filter((n) => Boolean(n.deletedAt)),
+    [notes]
+  );
 
-  const currentNotesList =
-    activeTab === 'notes'
+  const currentNotesList = useMemo(() => {
+    return activeTab === 'notes'
       ? activeNotes
       : activeTab === 'blog'
       ? blogNotes
       : activeTab === 'projects'
       ? projectNotes
       : trashedNotes;
+  }, [activeNotes, blogNotes, projectNotes, trashedNotes, activeTab]);
 
   // --------------------------------------------------
   // Search
   // --------------------------------------------------
 
-  const filteredNotes = currentNotesList.filter((note) => {
-    const query = searchQuery.toLowerCase();
+  const filteredNotes = useMemo(() => {
+    const query = searchQuery.toLowerCase().trim();
+    if (!query) return currentNotesList;
 
-    return (
-      !searchQuery ||
-      note.title.toLowerCase().includes(query) ||
-      note.content.toLowerCase().includes(query) ||
-      (note.description && note.description.toLowerCase().includes(query)) ||
-      (note.author && note.author.toLowerCase().includes(query)) ||
-      (note.project && note.project.toLowerCase().includes(query)) ||
-      (note.slug && note.slug.toLowerCase().includes(query)) ||
-      (note.status && note.status.toLowerCase().includes(query)) ||
-      (note.year && note.year.toString().toLowerCase().includes(query)) ||
-      (note.url && note.url.toLowerCase().includes(query)) ||
-      (note.github && note.github.toLowerCase().includes(query)) ||
-      note.tags.some((t) => t.toLowerCase().includes(query))
-    );
-  });
+    return currentNotesList.filter((note) => {
+      return (
+        note.title.toLowerCase().includes(query) ||
+        note.content.toLowerCase().includes(query) ||
+        (note.description && note.description.toLowerCase().includes(query)) ||
+        (note.author && note.author.toLowerCase().includes(query)) ||
+        (note.project && note.project.toLowerCase().includes(query)) ||
+        (note.slug && note.slug.toLowerCase().includes(query)) ||
+        (note.status && note.status.toLowerCase().includes(query)) ||
+        (note.year && note.year.toString().toLowerCase().includes(query)) ||
+        (note.url && note.url.toLowerCase().includes(query)) ||
+        (note.github && note.github.toLowerCase().includes(query)) ||
+        note.tags.some((t) => t.toLowerCase().includes(query))
+      );
+    });
+  }, [currentNotesList, searchQuery]);
 
   // --------------------------------------------------
-  // Sort notes
+  // Sort notes (Most recent first)
   // --------------------------------------------------
 
-  const sortedNotes = [...filteredNotes].sort((a, b) => {
-    if (activeTab === 'projects') {
-      if (a.order !== undefined && b.order !== undefined && a.order !== b.order) {
-        return a.order - b.order;
+  const sortedNotes = useMemo(() => {
+    return [...filteredNotes].sort((a, b) => {
+      // Helper to extract timestamp from date string if valid
+      const getTimestamp = (note: Note): number => {
+        if (note.date) {
+          const parsed = Date.parse(note.date);
+          if (!isNaN(parsed) && parsed > 0) return parsed;
+        }
+        return note.updatedAt || note.createdAt || 0;
+      };
+
+      if (activeTab === 'projects') {
+        // 1. Explicit manual order if defined
+        if (a.order !== undefined && b.order !== undefined && a.order !== b.order) {
+          return a.order - b.order;
+        }
+        if (a.order !== undefined && b.order === undefined) return -1;
+        if (a.order === undefined && b.order !== undefined) return 1;
+
+        // 2. Year descending (most recent year on top, e.g. 2026 > 2024)
+        const yearA = a.year ? parseInt(String(a.year), 10) : 0;
+        const yearB = b.year ? parseInt(String(b.year), 10) : 0;
+        if (!isNaN(yearA) && !isNaN(yearB) && yearA > 0 && yearB > 0 && yearA !== yearB) {
+          return yearB - yearA;
+        }
+
+        // 3. Most recent date / updated timestamp
+        const timeA = getTimestamp(a);
+        const timeB = getTimestamp(b);
+        return timeB - timeA;
       }
-      if (a.order !== undefined && b.order === undefined) return -1;
-      if (a.order === undefined && b.order !== undefined) return 1;
-      const timeA = a.updatedAt || a.createdAt || 0;
-      const timeB = b.updatedAt || b.createdAt || 0;
-      return timeB - timeA;
-    }
 
-    if (activeTab === 'notes' || activeTab === 'blog') {
-      if (a.pinned && !b.pinned) return -1;
-      if (!a.pinned && b.pinned) return 1;
+      if (activeTab === 'blog') {
+        // 1. Pinned posts on top
+        if (a.pinned && !b.pinned) return -1;
+        if (!a.pinned && b.pinned) return 1;
 
-      const timeA = a.updatedAt || a.createdAt || 0;
-      const timeB = b.updatedAt || b.createdAt || 0;
-      return timeB - timeA;
-    }
+        // 2. Publication date / most recent timestamp on top
+        const timeA = getTimestamp(a);
+        const timeB = getTimestamp(b);
+        return timeB - timeA;
+      }
 
-    return (b.deletedAt || 0) - (a.deletedAt || 0);
-  });
+      if (activeTab === 'notes') {
+        if (a.pinned && !b.pinned) return -1;
+        if (!a.pinned && b.pinned) return 1;
+
+        const timeA = a.updatedAt || a.createdAt || 0;
+        const timeB = b.updatedAt || b.createdAt || 0;
+        return timeB - timeA;
+      }
+
+      return (b.deletedAt || 0) - (a.deletedAt || 0);
+    });
+  }, [filteredNotes, activeTab]);
 
   // --------------------------------------------------
   // Long press / multi-selection

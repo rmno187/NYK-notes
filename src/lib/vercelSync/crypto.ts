@@ -13,21 +13,24 @@ export interface DerivedKeys {
   encryptionKeyRaw: string; // Base64 raw key for secure device pairing
 }
 
-// Convert ArrayBuffer / Uint8Array to Base64
+// Convert ArrayBuffer / Uint8Array to Base64 efficiently using chunking (prevents GC thrashing & stack overflows)
 export function bufferToBase64(buffer: ArrayBuffer | Uint8Array): string {
-  const bytes = new Uint8Array(buffer);
+  const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
+  const CHUNK_SIZE = 0x8000; // 32KB
   let binary = '';
-  for (let i = 0; i < bytes.byteLength; i++) {
-    binary += String.fromCharCode(bytes[i]);
+  for (let i = 0; i < bytes.length; i += CHUNK_SIZE) {
+    const chunk = bytes.subarray(i, i + CHUNK_SIZE);
+    binary += String.fromCharCode.apply(null, chunk as unknown as number[]);
   }
   return btoa(binary);
 }
 
-// Convert Base64 to Uint8Array
+// Convert Base64 to Uint8Array safely and efficiently
 export function base64ToBuffer(base64: string): Uint8Array {
   const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) {
+  const len = binary.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i++) {
     bytes[i] = binary.charCodeAt(i);
   }
   return bytes;
@@ -35,10 +38,12 @@ export function base64ToBuffer(base64: string): Uint8Array {
 
 // Convert ArrayBuffer to Hex String
 export function bufferToHex(buffer: ArrayBuffer | Uint8Array): string {
-  const bytes = new Uint8Array(buffer);
-  return Array.from(bytes)
-    .map((b) => b.toString(16).padStart(2, '0'))
-    .join('');
+  const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
+  let hex = '';
+  for (let i = 0; i < bytes.length; i++) {
+    hex += bytes[i].toString(16).padStart(2, '0');
+  }
+  return hex;
 }
 
 // Convert Hex String to Uint8Array

@@ -1,76 +1,83 @@
-# Offline Markdown Notes 📝
+# Markdown Studio & Blog CMS 📝
 
-A privacy-first, 100% offline Markdown notes editor built with React, Vite, TypeScript, and Tailwind CSS.
-
-Zero online connectivity. Zero AI. Zero cloud servers. Your notes remain entirely under your control on your machine.
+A privacy-first, lightning-fast Markdown editor and static-site CMS built with React, TypeScript, Vite, and Tailwind CSS. Seamlessly author and manage **Blog Posts**, **Portfolio Projects**, and **Personal Notes** with YAML frontmatter, local folder synchronization, and optional encrypted cloud sync.
 
 ---
 
-## Key Features 🚀
+## 🚀 Key Features
 
-- **100% Offline & Private**: Runs entirely in your browser with zero network requests or analytics.
-- **Local Directory Storage**: Select a folder on your computer to save notes directly as standard `.md` files using the browser File System Access API.
-- **AES-256-GCM Encrypted Backups**: Export and restore your notebook encrypted with strong PBKDF2 key derivation (100,000 iterations) and AES-256-GCM encryption.
-- **Full Markdown Editor & Preview**: Support for live side-by-side split rendering, task lists, tables, code blocks, blockquotes, and formatting shortcuts.
-- **Tag Organization System**: Categorize notes with custom tags and inline `#hashtags` with instant filtering.
-- **Command Palette & Keyboard Navigation**: Press `Cmd + K` or `Ctrl + K` to launch instant command search, or use shortcuts like `Cmd + N` (New note), `Cmd + P` (Toggle view), and `Cmd + Shift + D` (Toggle theme).
-- **Dark Mode**: High-contrast, clean dark and light themes.
+### 📑 Multi-Document Types
+- **Blog Posts (`posts/`)**: Full frontmatter support (`title`, `description` / subtitle, `slug`, `date`, `author`, `project`, `tags`, `image`, `pinned`).
+- **Portfolio Projects (`projects/`)**: Structured project management (`title`, `description`, `slug`, `status`, `year`, `url`, `github`, `tags`, `order`).
+- **Personal Notes (`notes/`)**: Quick scratchpad for everyday writing with tag filtering, pins, and search.
+
+### 💾 Storage & Folder Sync Modes
+- **Local Folder Direct Sync**: Connect to your static site repository or local disk folders (`posts/`, `projects/`, `notes/`). Markdown files and embedded image assets are read and written directly to your disk via the File System Access API.
+- **Offline-First IndexedDB**: Automatic local persistence in your browser with zero latency.
+- **Optional Vercel Cloud Sync**: Sync notes securely across your devices with end-to-end encryption.
+- **Encrypted Backups**: Export and import your entire workspace encrypted with **AES-256-GCM** (PBKDF2 key derivation with 100,000 iterations).
+- **Import / Export**: Batch import standard `.md` files or zip archives with automatic frontmatter extraction.
+
+### ✍️ Authoring Experience
+- **Dual Editor Modes**: Seamlessly switch between rich interactive **WYSIWYG formatting** and **Raw Markdown source** (`⌘ + E` / `Ctrl + E`).
+- **Interactive Markdown Toolbar**: Quick buttons for headings, bold, italic, underline, blockquotes, code blocks, checklists, links, images, tables, and horizontal rules.
+- **Metadata Drawer**: Slideout inspector to edit frontmatter, tags, author, publication date, project associations, URLs, status, and slugs.
+- **Image & Asset Management**: Insert local images or external URLs directly into the editor; local images are stored alongside notes in your configured assets directory.
+- **Instant Search**: Press `⌘ + F` or `Ctrl + F` to quickly filter notes, posts, and projects by title, content, or tags.
+- **Dark & Light Mode**: High-contrast, clean dark and light themes with instant toggling.
 
 ---
 
-## Keyboard Shortcuts ⌨️
+## ⌨️ Keyboard Shortcuts
 
 | Shortcut | Action |
 | :--- | :--- |
-| `⌘ + K` / `Ctrl + K` | Open Command Palette |
-| `⌘ + N` / `Ctrl + N` | Create New Note |
+| `⌥ + N` / `Alt + N` | Create New Note / Post / Project |
+| `⌘ + S` / `Ctrl + S` | Save `.md` to Local Folder |
+| `⌘ + O` / `Ctrl + O` | Import / Open `.md` File |
 | `⌘ + F` / `Ctrl + F` | Focus Search Input |
-| `⌘ + P` / `Ctrl + P` | Toggle View (Split / Edit / Preview) |
+| `⌘ + E` / `Ctrl + E` | Toggle WYSIWYG / Raw Markdown |
 | `⌘ + ⇧ + D` / `Ctrl + Shift + D` | Toggle Dark / Light Theme |
 | `⌘ + ⇧ + B` / `Ctrl + Shift + B` | Open Encrypted Backup Modal |
-| `⌘ + ⇧ + F` / `Ctrl + Shift + F` | Toggle Focus Mode |
-| `?` | Keyboard Shortcuts Cheat Sheet |
+| `?` / `⇧ + ?` | Show Keyboard Shortcuts Cheat Sheet |
+| `Esc` | Close Modals / Clear Search |
 
 ---
 
-## Local Development Setup 🛠️
+## 🛠️ Local Development
 
 ```bash
-# Clone repository
-git clone https://github.com/your-username/offline-markdown-notes.git
+# Clone the repository
+git clone https://github.com/rmno187/NYK-notes.git
 
 # Navigate to project directory
-cd offline-markdown-notes
+cd NYK-notes
 
 # Install dependencies
 npm install
 
-# Start development server
+# Start the local development server
 npm run dev
 ```
 
----
-
-## Deploying to Vercel 🌐
-
-This project is optimized for static SPA hosting on **Vercel**:
-
-1. Push your code to GitHub:
-   ```bash
-   git init
-   git add .
-   git commit -m "Initial commit"
-   git branch -M main
-   git remote add origin https://github.com/your-username/offline-markdown-notes.git
-   git push -u origin main
-   ```
-2. Go to [Vercel Dashboard](https://vercel.com) and click **"Add New Project"**.
-3. Import your GitHub repository.
-4. Select **Vite** as the Framework Preset.
-5. Click **Deploy**!
+The application will be accessible at `http://localhost:3000`.
 
 ---
 
-## License
+## 🌐 Deployment
+
+### Deploying to Vercel
+
+This application is ready for zero-config static deployment on **Vercel**:
+
+1. Push your repository to GitHub / GitLab / Bitbucket.
+2. Import the project in the [Vercel Dashboard](https://vercel.com).
+3. Framework Preset: **Vite**.
+4. Click **Deploy**.
+
+---
+
+## 📄 License
 
 Apache-2.0
+

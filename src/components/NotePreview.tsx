@@ -159,15 +159,22 @@ function renderLine(line: string): React.ReactNode {
   return <span>{parseInlineTokens(text)}</span>;
 }
 
-export const NotePreview: React.FC<NotePreviewProps> = ({ content }) => {
+const NotePreviewComponent: React.FC<NotePreviewProps> = ({ content }) => {
   if (!content || !content.trim()) {
     return <span className="italic text-neutral-400 font-normal text-sm">Empty note...</span>;
   }
 
+  // Fast slice & strip heavy base64 images so we never parse megabytes on the main thread for preview lines
+  let snippet = content;
+  if (snippet.length > 1500) {
+    snippet = snippet.replace(/data:image\/[^;]+;base64,[a-zA-Z0-9+/=]+/g, '');
+    snippet = snippet.slice(0, 1500);
+  }
+
   // Convert HTML to standard markdown if it looks like HTML
-  let markdown = content;
-  if (/<[a-z][\s\S]*>/i.test(content)) {
-    markdown = convertHtmlToMarkdown(content);
+  let markdown = snippet;
+  if (/<[a-z][\s\S]*>/i.test(snippet)) {
+    markdown = convertHtmlToMarkdown(snippet);
   }
 
   // Remove images ![alt](url) and HTML img tags
@@ -197,3 +204,5 @@ export const NotePreview: React.FC<NotePreviewProps> = ({ content }) => {
     </div>
   );
 };
+
+export const NotePreview = React.memo(NotePreviewComponent);

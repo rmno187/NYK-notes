@@ -303,16 +303,23 @@ export default function App() {
   useEffect(() => {
     if (storageMode !== 'vercel') return;
 
-    const unsubscribe = syncManager.subscribeNotes((remoteNotes) => {
+    const unsubscribe = syncManager.subscribeNotes((remoteNotes, changedNotes) => {
+      // 1. Pure state update
       setNotes((prevNotes) => {
         const merged = mergeNotes(prevNotes, remoteNotes);
+        return merged.filter((n) => !isNoteEmpty(n) || n.deletedAt);
+      });
 
-        // Instantly write remote synced notes to local disk folders if configured!
+      // 2. Perform side-effects OUTSIDE the state updater, only on notes that actually changed
+      const notesToProcess = changedNotes && changedNotes.length > 0 ? changedNotes : [];
+
+      if (notesToProcess.length > 0) {
+        // Only write changed remote notes to local disk folder if configured
         if (
           localFolderManager.hasAnyFolderConfigured() &&
           localFolderManager.getConfig().autoSyncToDisk
         ) {
-          for (const r of remoteNotes) {
+          for (const r of notesToProcess) {
             if (!isNoteEmpty(r) && !r.deletedAt) {
               localFolderManager.saveNoteToLocalFolder(r).catch((err) => {
                 console.warn('Auto saving remote synced note to disk error:', err);
@@ -323,15 +330,13 @@ export default function App() {
           }
         }
 
-        // Keep local IndexedDB backup up to date
-        for (const n of merged) {
+        // Only save changed notes to local IndexedDB backup
+        for (const n of notesToProcess) {
           if (!isNoteEmpty(n)) {
             saveIndexedDBNote(n).catch(() => {});
           }
         }
-
-        return merged.filter((n) => !isNoteEmpty(n) || n.deletedAt);
-      });
+      }
     });
 
     return () => {
@@ -382,6 +387,10 @@ export default function App() {
   const localFolderSyncTimers = useRef<Map<string, NodeJS.Timeout>>(new Map());
   const pendingSyncNotes = useRef<Map<string, { note: Note; previousFileName?: string }>>(new Map());
 
+  // Debounce timers for primary storage (IndexedDB / Vercel / Filesystem)
+  const persistDebounceTimers = useRef<Map<string, NodeJS.Timeout>>(new Map());
+  const pendingPersistNotes = useRef<Map<string, { note: Note; previousFileName?: string }>>(new Map());
+
   // Cancel any pending sync for a note
   const cancelPendingLocalSync = useCallback((noteId: string) => {
     const timer = localFolderSyncTimers.current.get(noteId);
@@ -390,6 +399,15 @@ export default function App() {
       localFolderSyncTimers.current.delete(noteId);
     }
     pendingSyncNotes.current.delete(noteId);
+  }, []);
+
+  const cancelPendingPersist = useCallback((noteId: string) => {
+    const timer = persistDebounceTimers.current.get(noteId);
+    if (timer) {
+      clearTimeout(timer);
+      persistDebounceTimers.current.delete(noteId);
+    }
+    pendingPersistNotes.current.delete(noteId);
   }, []);
 
   // Flush pending sync for a note or all notes immediately
@@ -427,17 +445,9 @@ export default function App() {
     }
   }, []);
 
-  // Flush on unmount
-  useEffect(() => {
-    return () => {
-      flushPendingLocalSync();
-    };
-  }, [flushPendingLocalSync]);
-
-  // Handle Note Save to Active Storage Provider
-  const persistNote = useCallback(
+  // Direct persistence worker without debounce
+  const executePersist = useCallback(
     async (updatedNote: Note, previousFileName?: string) => {
-      // Do not sync or persist empty notes unless it's a deletion tombstone
       if (isNoteEmpty(updatedNote) && !updatedNote.deletedAt) {
         return;
       }
@@ -458,7 +468,6 @@ export default function App() {
             cancelPendingLocalSync(updatedNote.id);
             await localFolderManager.deleteNoteFromLocalFolder(updatedNote);
           } else if (localFolderManager.getConfig().autoSyncToDisk) {
-            // Debounce disk writes while user is actively typing
             const existingTimer = localFolderSyncTimers.current.get(updatedNote.id);
             if (existingTimer) {
               clearTimeout(existingTimer);
@@ -499,7 +508,7 @@ export default function App() {
               } catch (err) {
                 console.warn('Auto local folder sync error:', err);
               }
-            }, 350);
+            }, 800);
 
             localFolderSyncTimers.current.set(updatedNote.id, timer);
           }
@@ -509,6 +518,70 @@ export default function App() {
       }
     },
     [storageMode, directoryHandle, cancelPendingLocalSync]
+  );
+
+  // Flush pending persists immediately
+  const flushPendingPersists = useCallback(
+    async (noteId?: string) => {
+      const targetIds = noteId ? [noteId] : Array.from(pendingPersistNotes.current.keys());
+      for (const id of targetIds) {
+        const timer = persistDebounceTimers.current.get(id);
+        if (timer) {
+          clearTimeout(timer);
+          persistDebounceTimers.current.delete(id);
+        }
+        const pending = pendingPersistNotes.current.get(id);
+        pendingPersistNotes.current.delete(id);
+        if (pending) {
+          await executePersist(pending.note, pending.previousFileName);
+        }
+      }
+      await flushPendingLocalSync(noteId);
+      if (storageMode === 'vercel') {
+        await syncManager.flushPendingPushes();
+      }
+    },
+    [executePersist, flushPendingLocalSync, storageMode]
+  );
+
+  // Flush on unmount and beforeunload
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      flushPendingPersists();
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+      flushPendingPersists();
+    };
+  }, [flushPendingPersists]);
+
+  // Handle Note Save to Active Storage Provider (with debouncing for high-frequency typing)
+  const persistNote = useCallback(
+    async (updatedNote: Note, previousFileName?: string, immediate = false) => {
+      if (immediate || updatedNote.deletedAt) {
+        cancelPendingPersist(updatedNote.id);
+        await executePersist(updatedNote, previousFileName);
+        return;
+      }
+
+      // Debounce continuous typing/property changes
+      cancelPendingPersist(updatedNote.id);
+      pendingPersistNotes.current.set(updatedNote.id, { note: updatedNote, previousFileName });
+
+      const timer = setTimeout(async () => {
+        persistDebounceTimers.current.delete(updatedNote.id);
+        const pending = pendingPersistNotes.current.get(updatedNote.id);
+        pendingPersistNotes.current.delete(updatedNote.id);
+        if (pending) {
+          await executePersist(pending.note, pending.previousFileName);
+        }
+      }, 900);
+
+      persistDebounceTimers.current.set(updatedNote.id, timer);
+    },
+    [cancelPendingPersist, executePersist]
   );
 
   // Update Note Title
@@ -897,22 +970,22 @@ export default function App() {
   const handleSelectNote = useCallback(
     (id: string) => {
       if (activeNoteId && activeNoteId !== id) {
-        flushPendingLocalSync(activeNoteId);
+        flushPendingPersists(activeNoteId);
         checkAndDeleteEmptyNote(activeNoteId);
       }
       setActiveNoteId(id);
       setMobileView('editor');
     },
-    [activeNoteId, checkAndDeleteEmptyNote, flushPendingLocalSync]
+    [activeNoteId, checkAndDeleteEmptyNote, flushPendingPersists]
   );
 
   const handleBackToList = useCallback(() => {
     if (activeNoteId) {
-      flushPendingLocalSync(activeNoteId);
+      flushPendingPersists(activeNoteId);
       checkAndDeleteEmptyNote(activeNoteId);
     }
     setMobileView('list');
-  }, [activeNoteId, checkAndDeleteEmptyNote, flushPendingLocalSync]);
+  }, [activeNoteId, checkAndDeleteEmptyNote, flushPendingPersists]);
 
   // Create New Note, Blog Post, or Project
   const handleNewNote = useCallback(
@@ -1505,7 +1578,7 @@ export default function App() {
     onSaveLocalFile: handleSaveCurrentNoteToLocalFolder,
     onOpenLocalFile: () => setIsImportModalOpen(true),
     onToggleDarkMode: handleToggleTheme,
-    onToggleViewMode: handleToggleEditorMode,
+    onToggleEditorMode: handleToggleEditorMode,
     onSaveNote: () => {
       if (activeNote) persistNote(activeNote);
     },

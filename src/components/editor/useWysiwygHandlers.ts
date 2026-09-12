@@ -6,6 +6,10 @@ import {
   setCaretCharacterOffsetWithin,
   getCaretBlockAndOffset,
   stripLeadingPrefixFromFragment,
+  applyInlineMarkdownFormatting,
+  wrapSelectedTextWithDelimiters,
+  createMarkdownTableFromHeader,
+  handleTableNavigation,
 } from './editorUtils';
 
 interface UseWysiwygHandlersProps {
@@ -38,6 +42,7 @@ export function useWysiwygHandlers({
     let isBold = false;
     let isItalic = false;
     let isUnderline = false;
+    let isStrike = false;
     let isBullet = false;
     let isNumber = false;
 
@@ -45,6 +50,7 @@ export function useWysiwygHandlers({
       isBold = document.queryCommandState('bold');
       isItalic = document.queryCommandState('italic');
       isUnderline = document.queryCommandState('underline');
+      isStrike = document.queryCommandState('strikeThrough');
       isBullet = document.queryCommandState('insertUnorderedList');
       isNumber = document.queryCommandState('insertOrderedList');
     } catch {
@@ -71,6 +77,7 @@ export function useWysiwygHandlers({
         if (tag === 'PRE' || tag === 'CODE') isCode = true;
         if (tag === 'A') isLink = true;
         if (tag === 'U' || tag === 'INS') isUnderline = true;
+        if (tag === 'S' || tag === 'DEL' || tag === 'STRIKE') isStrike = true;
         if (
           tag === 'LI' &&
           ((node as HTMLElement).classList.contains('task-list-item') ||
@@ -86,6 +93,7 @@ export function useWysiwygHandlers({
       bold: isBold,
       italic: isItalic,
       underline: isUnderline,
+      strike: isStrike,
       heading: isHeading,
       h2: isH2,
       bullet: isBullet && !isTask,
@@ -100,6 +108,15 @@ export function useWysiwygHandlers({
   // Handle direct editing in WYSIWYG contentEditable div
   const handleWysiwygInput = useCallback(() => {
     if (!wysiwygRef.current) return;
+    // Synchronize the 'checked' attribute on all checkbox inputs with their current .checked state
+    wysiwygRef.current.querySelectorAll('input[type="checkbox"]').forEach((input) => {
+      const cb = input as HTMLInputElement;
+      if (cb.checked) {
+        cb.setAttribute('checked', 'checked');
+      } else {
+        cb.removeAttribute('checked');
+      }
+    });
     const html = wysiwygRef.current.innerHTML;
     const markdown = convertHtmlToMarkdown(html);
     const offset = getCaretCharacterOffsetWithin(wysiwygRef.current);
@@ -113,32 +130,31 @@ export function useWysiwygHandlers({
       const target = e.target as HTMLElement;
       if (target.tagName === 'INPUT' && (target as HTMLInputElement).type === 'checkbox') {
         const cb = target as HTMLInputElement;
-        const isCheckedAttr = cb.hasAttribute('checked');
-
-        // Ensure checked state and attribute are in sync
-        if (cb.checked !== isCheckedAttr) {
-          if (cb.checked) {
-            cb.setAttribute('checked', 'checked');
-          } else {
-            cb.removeAttribute('checked');
-          }
+        // In contenteditable, clicking a checkbox fires the click event.
+        // Sync the checked attribute immediately with cb.checked
+        if (cb.checked) {
+          cb.setAttribute('checked', 'checked');
         } else {
-          cb.checked = !cb.checked;
-          if (cb.checked) {
-            cb.setAttribute('checked', 'checked');
-          } else {
-            cb.removeAttribute('checked');
-          }
+          cb.removeAttribute('checked');
         }
 
         if (wysiwygRef.current) {
+          wysiwygRef.current.querySelectorAll('input[type="checkbox"]').forEach((input) => {
+            const el = input as HTMLInputElement;
+            if (el.checked) {
+              el.setAttribute('checked', 'checked');
+            } else {
+              el.removeAttribute('checked');
+            }
+          });
           const html = wysiwygRef.current.innerHTML;
           const markdown = convertHtmlToMarkdown(html);
           onChangeContent(markdown);
+          checkActiveFormats();
         }
       }
     },
-    [wysiwygRef, onChangeContent]
+    [wysiwygRef, onChangeContent, checkActiveFormats]
   );
 
   // Handle Paste in WYSIWYG editor
@@ -247,19 +263,26 @@ export function useWysiwygHandlers({
     [wysiwygRef, handleWysiwygInput, checkActiveFormats]
   );
 
-  // Unified WYSIWYG block formatting helper
+  // Unified WYSIWYG block formatting engine - Single Source of Truth for all styling
   const applyWysiwygBlockFormat = useCallback(
-    (targetType: string) => {
+    (
+      targetType: string,
+      options?: {
+        nodes?: HTMLElement[];
+        mode?: 'toggle' | 'apply';
+        caretPlacement?: 'start' | 'end' | 'preserve';
+        checked?: boolean;
+      }
+    ) => {
       if (!wysiwygRef.current) return;
-
       wysiwygRef.current.focus();
 
       const sel = window.getSelection();
-      if (!sel || sel.rangeCount === 0) return;
-      const range = sel.getRangeAt(0);
-
+      const mode = options?.mode || 'toggle';
+      const caretPlacement = options?.caretPlacement || 'preserve';
       const savedCaretOffset = getCaretCharacterOffsetWithin(wysiwygRef.current);
 
+      // Convert loose text nodes in root into paragraphs
       (Array.from(wysiwygRef.current.childNodes) as ChildNode[]).forEach((child) => {
         if (child.nodeType === Node.TEXT_NODE && child.textContent?.trim()) {
           const p = document.createElement('p');
@@ -268,24 +291,33 @@ export function useWysiwygHandlers({
         }
       });
 
-      const allBlocks = Array.from(
-        wysiwygRef.current.querySelectorAll('li, p, h1, h2, h3, h4, h5, h6, blockquote, pre')
-      ) as HTMLElement[];
+      let selectedNodes: HTMLElement[] = [];
+      if (options?.nodes && options.nodes.length > 0) {
+        selectedNodes = options.nodes;
+      } else {
+        const allBlocks = Array.from(
+          wysiwygRef.current.querySelectorAll('li, p, h1, h2, h3, h4, h5, h6, blockquote, pre')
+        ) as HTMLElement[];
 
-      let selectedNodes = allBlocks.filter((node) => {
-        if (node.tagName === 'DIV') return false;
-        try {
-          return range.intersectsNode(node);
-        } catch {
-          return false;
-        }
-      });
+        if (sel && sel.rangeCount > 0) {
+          const range = sel.getRangeAt(0);
+          selectedNodes = allBlocks.filter((node) => {
+            if (node.tagName === 'DIV') return false;
+            try {
+              return range.intersectsNode(node);
+            } catch {
+              return false;
+            }
+          });
 
-      if (selectedNodes.length === 0 && sel.anchorNode) {
-        let curr: Node | null = sel.anchorNode.nodeType === Node.TEXT_NODE ? sel.anchorNode.parentNode : sel.anchorNode;
-        const block = (curr as HTMLElement)?.closest('li, p, h1, h2, h3, h4, h5, h6, blockquote, pre');
-        if (block && wysiwygRef.current.contains(block)) {
-          selectedNodes = [block as HTMLElement];
+          if (selectedNodes.length === 0 && sel.anchorNode) {
+            let curr: Node | null =
+              sel.anchorNode.nodeType === Node.TEXT_NODE ? sel.anchorNode.parentNode : sel.anchorNode;
+            const block = (curr as HTMLElement)?.closest('li, p, h1, h2, h3, h4, h5, h6, blockquote, pre');
+            if (block && wysiwygRef.current.contains(block)) {
+              selectedNodes = [block as HTMLElement];
+            }
+          }
         }
       }
 
@@ -310,26 +342,33 @@ export function useWysiwygHandlers({
           }
           return 'bullet';
         }
-        if (node.tagName === 'H1') return 'heading';
-        if (node.tagName === 'H2') return 'h2';
-        if (node.tagName === 'BLOCKQUOTE') return 'quote';
-        if (node.tagName === 'PRE') return 'code';
+        const tag = node.tagName.toLowerCase();
+        if (tag === 'h1') return 'heading';
+        if (tag === 'h2') return 'h2';
+        if (tag === 'h3') return 'h3';
+        if (tag === 'h4') return 'h4';
+        if (tag === 'h5') return 'h5';
+        if (tag === 'h6') return 'h6';
+        if (tag === 'blockquote') return 'quote';
+        if (tag === 'pre') return 'code';
         return 'paragraph';
       };
 
-      const allMatch = selectedNodes.every((node) => getNodeFormat(node) === targetType);
-      const finalFormat = allMatch ? 'paragraph' : targetType;
+      const normalizedTarget = targetType === 'h1' ? 'heading' : targetType;
+      const allMatch = selectedNodes.every((node) => getNodeFormat(node) === normalizedTarget);
+      const finalFormat = mode === 'toggle' && allMatch ? 'paragraph' : normalizedTarget;
 
       const getCleanContent = (node: HTMLElement) => {
         const clone = node.cloneNode(true) as HTMLElement;
         clone.querySelectorAll('input[type="checkbox"]').forEach((cb) => cb.remove());
         let content = clone.innerHTML.trim();
-        content = content.replace(/^(\s*\[[\s\S]?\]|\s*[-*+•])\s*/i, '');
+        content = content.replace(/^(\s*(?:[-*+•]\s*)?\[[ x_]?\]|\s*[-*+•])\s*/i, '');
         if (!content) content = '<br>';
         return content;
       };
 
       const isTargetList = finalFormat === 'task' || finalFormat === 'bullet' || finalFormat === 'number';
+      let lastCreatedNode: HTMLElement | null = null;
 
       if (isTargetList) {
         const groups: HTMLElement[][] = [];
@@ -362,14 +401,39 @@ export function useWysiwygHandlers({
 
           group.forEach((node) => {
             const content = getCleanContent(node);
+            const textVal = node.textContent || '';
+            const isInitiallyChecked =
+              options?.checked !== undefined
+                ? options.checked
+                : /^\s*(?:[-*+•]\s*)?\[x\]/i.test(textVal) ||
+                  Boolean((node.querySelector('input[type="checkbox"]') as HTMLInputElement)?.checked);
+
             const li = document.createElement('li');
             if (finalFormat === 'task') {
               li.className = 'task-list-item';
-              li.innerHTML = `<input type="checkbox" /> ${content}`;
+              const cb = document.createElement('input');
+              cb.type = 'checkbox';
+              cb.setAttribute('contenteditable', 'false');
+              if (isInitiallyChecked) {
+                cb.checked = true;
+                cb.setAttribute('checked', 'checked');
+              }
+              li.appendChild(cb);
+              li.appendChild(document.createTextNode(' '));
+              if (content === '<br>') {
+                li.appendChild(document.createElement('br'));
+              } else {
+                const temp = document.createElement('span');
+                temp.innerHTML = content;
+                while (temp.firstChild) {
+                  li.appendChild(temp.firstChild);
+                }
+              }
             } else {
               li.innerHTML = content;
             }
             listEl.appendChild(li);
+            lastCreatedNode = li;
           });
 
           const parentList = first.tagName === 'LI' ? first.parentElement : null;
@@ -394,19 +458,36 @@ export function useWysiwygHandlers({
               newBlock = document.createElement('h2');
               newBlock.innerHTML = content;
               break;
+            case 'h3':
+              newBlock = document.createElement('h3');
+              newBlock.innerHTML = content;
+              break;
+            case 'h4':
+              newBlock = document.createElement('h4');
+              newBlock.innerHTML = content;
+              break;
+            case 'h5':
+              newBlock = document.createElement('h5');
+              newBlock.innerHTML = content;
+              break;
+            case 'h6':
+              newBlock = document.createElement('h6');
+              newBlock.innerHTML = content;
+              break;
             case 'quote':
               newBlock = document.createElement('blockquote');
-              newBlock.innerHTML = content;
+              newBlock.innerHTML = `<p>${content}</p>`;
               break;
             case 'code':
               newBlock = document.createElement('pre');
-              newBlock.innerHTML = content;
+              newBlock.innerHTML = `<code>${content === '<br>' ? '' : content}</code>`;
               break;
             default:
               newBlock = document.createElement('p');
               newBlock.innerHTML = content;
               break;
           }
+          lastCreatedNode = newBlock;
 
           if (node.tagName === 'LI' && node.parentElement) {
             const listParent = node.parentElement;
@@ -446,7 +527,31 @@ export function useWysiwygHandlers({
       }
 
       wysiwygRef.current.focus();
-      setCaretCharacterOffsetWithin(wysiwygRef.current, savedCaretOffset);
+
+      if (caretPlacement === 'start' && lastCreatedNode) {
+        const targetRange = document.createRange();
+        if (finalFormat === 'task' && (lastCreatedNode as HTMLElement).childNodes.length > 2) {
+          targetRange.setStart((lastCreatedNode as HTMLElement).childNodes[2], 0);
+        } else if (finalFormat === 'quote') {
+          const innerP = (lastCreatedNode as HTMLElement).querySelector('p') || lastCreatedNode;
+          targetRange.selectNodeContents(innerP);
+          targetRange.collapse(true);
+        } else if (finalFormat === 'code') {
+          const innerCode = (lastCreatedNode as HTMLElement).querySelector('code') || lastCreatedNode;
+          targetRange.selectNodeContents(innerCode);
+          targetRange.collapse(true);
+        } else {
+          targetRange.selectNodeContents(lastCreatedNode);
+          targetRange.collapse(true);
+        }
+        const s = window.getSelection();
+        if (s) {
+          s.removeAllRanges();
+          s.addRange(targetRange);
+        }
+      } else {
+        setCaretCharacterOffsetWithin(wysiwygRef.current, savedCaretOffset);
+      }
 
       handleWysiwygInput();
       checkActiveFormats();
@@ -469,6 +574,30 @@ export function useWysiwygHandlers({
         case 'underline':
           document.execCommand('underline', false);
           break;
+        case 'strike':
+          document.execCommand('strikeThrough', false);
+          break;
+        case 'clear': {
+          document.execCommand('removeFormat', false);
+          document.execCommand('unlink', false);
+          if (document.queryCommandState('strikeThrough')) {
+            document.execCommand('strikeThrough', false);
+          }
+          const sel = window.getSelection();
+          if (sel && sel.anchorNode) {
+            let node: Node | null = sel.anchorNode;
+            if (node.nodeType === Node.TEXT_NODE) node = node.parentNode;
+            while (node && node !== wysiwygRef.current) {
+              const tag = (node as HTMLElement).tagName?.toUpperCase();
+              if (['H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'BLOCKQUOTE', 'PRE'].includes(tag)) {
+                document.execCommand('formatBlock', false, '<p>');
+                break;
+              }
+              node = node.parentNode;
+            }
+          }
+          break;
+        }
         case 'paragraph':
         case 'heading':
         case 'h2':
@@ -477,7 +606,7 @@ export function useWysiwygHandlers({
         case 'bullet':
         case 'number':
         case 'task':
-          applyWysiwygBlockFormat(type);
+          applyWysiwygBlockFormat(type, { mode: 'toggle' });
           break;
         case 'link': {
           if (activeFormats.link) {
@@ -518,7 +647,7 @@ export function useWysiwygHandlers({
       handleWysiwygInput();
       checkActiveFormats();
     },
-    [wysiwygRef, activeFormats.link, applyWysiwygBlockFormat, handleWysiwygInput, checkActiveFormats, onOpenLinkModal]
+    [wysiwygRef, activeFormats.link, applyWysiwygBlockFormat, handleWysiwygInput, checkActiveFormats, onOpenLinkModal, onOpenImageModal]
   );
 
   // Handle key presses inside WYSIWYG editor
@@ -543,6 +672,110 @@ export function useWysiwygHandlers({
         e.preventDefault();
         handleRedo();
         return;
+      }
+
+      // Formatting shortcuts: Cmd+B, Cmd+I, Cmd+U, Cmd+K, Cmd+Shift+X (strikethrough), Cmd+Shift+C (code), Cmd+Shift+H (highlight)
+      if (isCmdOrCtrl) {
+        if (keyLower === 'b') {
+          e.preventDefault();
+          document.execCommand('bold', false);
+          handleWysiwygInput();
+          checkActiveFormats();
+          return;
+        }
+        if (keyLower === 'i') {
+          e.preventDefault();
+          document.execCommand('italic', false);
+          handleWysiwygInput();
+          checkActiveFormats();
+          return;
+        }
+        if (keyLower === 'u') {
+          e.preventDefault();
+          document.execCommand('underline', false);
+          handleWysiwygInput();
+          checkActiveFormats();
+          return;
+        }
+        if (keyLower === 'k') {
+          e.preventDefault();
+          const sel = window.getSelection();
+          let text = '';
+          let rangeToSave: Range | null = null;
+          if (sel && sel.rangeCount > 0) {
+            rangeToSave = sel.getRangeAt(0).cloneRange();
+            text = rangeToSave.toString();
+          }
+          onOpenLinkModal(text, rangeToSave);
+          return;
+        }
+        if (e.shiftKey && (keyLower === 'x' || keyLower === 's')) {
+          e.preventDefault();
+          document.execCommand('strikeThrough', false);
+          handleWysiwygInput();
+          checkActiveFormats();
+          return;
+        }
+        if (e.shiftKey && keyLower === 'c') {
+          e.preventDefault();
+          applyWysiwygBlockFormat('code', { mode: 'toggle' });
+          return;
+        }
+        if (e.shiftKey && keyLower === 'h') {
+          e.preventDefault();
+          const sel = window.getSelection();
+          if (sel && !sel.isCollapsed) {
+            wrapSelectedTextWithDelimiters(wysiwygRef.current, '==', '==');
+            applyInlineMarkdownFormatting(wysiwygRef.current);
+            handleWysiwygInput();
+            checkActiveFormats();
+          }
+          return;
+        }
+        if (e.key === '\\') {
+          e.preventDefault();
+          handleWysiwygFormatAction('clear');
+          return;
+        }
+      }
+
+      // Handle table navigation (Tab, Shift+Tab, Enter in table cells)
+      if (handleTableNavigation(e, wysiwygRef.current)) {
+        handleWysiwygInput();
+        checkActiveFormats();
+        return;
+      }
+
+      // Selection auto-wrapping with Markdown delimiter pairs: *, _, `, ~, [, (, ", ', =
+      const sel = window.getSelection();
+      if (sel && !sel.isCollapsed && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        let wrapped = false;
+        if (e.key === '*') {
+          wrapped = wrapSelectedTextWithDelimiters(wysiwygRef.current, '*', '*');
+        } else if (e.key === '_') {
+          wrapped = wrapSelectedTextWithDelimiters(wysiwygRef.current, '_', '_');
+        } else if (e.key === '`') {
+          wrapped = wrapSelectedTextWithDelimiters(wysiwygRef.current, '`', '`');
+        } else if (e.key === '~') {
+          wrapped = wrapSelectedTextWithDelimiters(wysiwygRef.current, '~~', '~~');
+        } else if (e.key === '[') {
+          wrapped = wrapSelectedTextWithDelimiters(wysiwygRef.current, '[', ']');
+        } else if (e.key === '(') {
+          wrapped = wrapSelectedTextWithDelimiters(wysiwygRef.current, '(', ')');
+        } else if (e.key === '"') {
+          wrapped = wrapSelectedTextWithDelimiters(wysiwygRef.current, '"', '"');
+        } else if (e.key === "'") {
+          wrapped = wrapSelectedTextWithDelimiters(wysiwygRef.current, "'", "'");
+        } else if (e.key === '=') {
+          wrapped = wrapSelectedTextWithDelimiters(wysiwygRef.current, '==', '==');
+        }
+
+        if (wrapped) {
+          e.preventDefault();
+          handleWysiwygInput();
+          checkActiveFormats();
+          return;
+        }
       }
 
       if (e.key === 'Tab') {
@@ -593,80 +826,245 @@ export function useWysiwygHandlers({
         }
       }
 
+      // Markdown shortcut on Space (e.g., "# ", "## ", "> ", "- ", "1. ", "[] ", "``` ", "--- ")
+      if (e.key === ' ') {
+        const info = getCaretBlockAndOffset(wysiwygRef.current);
+        if (info && info.blockNode) {
+          const { blockNode } = info;
+          const tag = blockNode.tagName.toUpperCase();
+
+          if (tag === 'P' || tag === 'DIV') {
+            const sel = window.getSelection();
+            if (sel && sel.rangeCount > 0 && sel.isCollapsed) {
+              const range = sel.getRangeAt(0);
+              const preRange = document.createRange();
+              preRange.selectNodeContents(blockNode);
+              preRange.setEnd(range.startContainer, range.startOffset);
+              const textBefore = preRange.toString().replace(/\u00A0/g, ' ');
+
+              // 1. Horizontal Rule on Space
+              if (/^(\s*(?:---|---|\*\*\*|___))$/.test(textBefore)) {
+                e.preventDefault();
+                const hr = document.createElement('hr');
+                const p = document.createElement('p');
+                p.innerHTML = '<br>';
+                blockNode.parentNode?.insertBefore(hr, blockNode);
+                blockNode.parentNode?.insertBefore(p, blockNode);
+                blockNode.remove();
+                const r = document.createRange();
+                r.selectNodeContents(p);
+                r.collapse(true);
+                sel.removeAllRanges();
+                sel.addRange(r);
+                handleWysiwygInput();
+                checkActiveFormats();
+                return;
+              }
+
+              // 2. Fenced Code Block on Space: ``` or ```lang
+              const codeMatch = textBefore.match(/^(\s*`{3}([a-zA-Z0-9_-]*))$/);
+              if (codeMatch) {
+                e.preventDefault();
+                const lang = codeMatch[2] || '';
+                const pre = document.createElement('pre');
+                const code = document.createElement('code');
+                if (lang) {
+                  code.className = `language-${lang}`;
+                  code.setAttribute('data-language', lang);
+                }
+                code.innerHTML = '<br>';
+                pre.appendChild(code);
+                const p = document.createElement('p');
+                p.innerHTML = '<br>';
+                blockNode.parentNode?.insertBefore(pre, blockNode);
+                blockNode.parentNode?.insertBefore(p, blockNode);
+                blockNode.remove();
+                const r = document.createRange();
+                r.selectNodeContents(code);
+                r.collapse(true);
+                sel.removeAllRanges();
+                sel.addRange(r);
+                handleWysiwygInput();
+                checkActiveFormats();
+                return;
+              }
+
+              let matchedFormat: string | null = null;
+              let isTaskChecked = false;
+
+              const taskSpaceMatch = textBefore.match(/^(\s*(?:[-*+•]\s*)?\[([ x_]?)\])$/i);
+              if (taskSpaceMatch) {
+                matchedFormat = 'task';
+                isTaskChecked = taskSpaceMatch[2]?.toLowerCase() === 'x';
+              } else if (/^(\s*#{1,6})$/.test(textBefore)) {
+                const level = textBefore.trim().length;
+                matchedFormat = `h${level}`;
+              } else if (/^(\s*>+)$/.test(textBefore)) {
+                matchedFormat = 'quote';
+              } else if (/^(\s*\d+[.)])$/.test(textBefore)) {
+                matchedFormat = 'number';
+              } else if (/^(\s*[-*+•])$/.test(textBefore)) {
+                matchedFormat = 'bullet';
+              }
+
+              if (matchedFormat) {
+                e.preventDefault();
+                preRange.deleteContents();
+                applyWysiwygBlockFormat(matchedFormat, {
+                  nodes: [blockNode],
+                  mode: 'apply',
+                  checked: isTaskChecked,
+                  caretPlacement: 'start',
+                });
+                return;
+              }
+            }
+          }
+        }
+
+        // Trigger inline markdown parsing after space
+        setTimeout(() => {
+          if (wysiwygRef.current) {
+            const formatted = applyInlineMarkdownFormatting(wysiwygRef.current);
+            if (formatted) {
+              handleWysiwygInput();
+              checkActiveFormats();
+            }
+          }
+        }, 0);
+      }
+
+      // Check for inline markdown completion triggers on closing characters or punctuation
+      if (['*', '_', '`', '~', '=', ')', ']', ',', '.', ';', '!', '?'].includes(e.key)) {
+        setTimeout(() => {
+          if (wysiwygRef.current) {
+            const formatted = applyInlineMarkdownFormatting(wysiwygRef.current);
+            if (formatted) {
+              handleWysiwygInput();
+              checkActiveFormats();
+            }
+          }
+        }, 0);
+      }
+
       if (e.key === 'Enter') {
         const info = getCaretBlockAndOffset(wysiwygRef.current);
         if (!info || !info.blockNode) return;
         const { blockNode } = info;
-        const tag = blockNode.tagName.toUpperCase();
+        const sel = window.getSelection();
+        if (!sel || sel.rangeCount === 0) return;
+        const range = sel.getRangeAt(0);
 
-        if (tag === 'LI') {
+        // 1. List Item Handling (UL / OL / Task lists)
+        const targetLi = blockNode.tagName.toUpperCase() === 'LI' ? blockNode : blockNode.closest('li');
+        if (targetLi) {
           e.preventDefault();
 
-          const isTaskItem =
-            blockNode.classList.contains('task-list-item') ||
-            blockNode.querySelector('input[type="checkbox"]') !== null ||
-            blockNode.closest('ul.contains-task-list') !== null;
+          // Shift+Enter in list item: continue text on a new line within the same list item
+          if (e.shiftKey) {
+            range.deleteContents();
+            const br = document.createElement('br');
+            range.insertNode(br);
 
-          const clone = blockNode.cloneNode(true) as HTMLElement;
-          clone.querySelectorAll('input[type="checkbox"]').forEach((cb) => cb.remove());
-          const textContent = clone.textContent?.replace(/[\r\n\s\u200B-\u200D\uFEFF]/g, '') || '';
-
-          if (textContent === '') {
-            const parentList = blockNode.closest('ul, ol');
-            blockNode.remove();
-
-            const p = document.createElement('p');
-            p.innerHTML = '<br>';
-
-            if (parentList) {
-              if (parentList.nextSibling) {
-                parentList.parentNode?.insertBefore(p, parentList.nextSibling);
-              } else {
-                parentList.parentNode?.appendChild(p);
-              }
-              if (parentList.children.length === 0) {
-                parentList.remove();
-              }
-            } else if (wysiwygRef.current) {
-              wysiwygRef.current.appendChild(p);
+            // In contenteditable, if br is at the end of targetLi, ensure there is a trailing br so caret can be placed
+            let next = br.nextSibling;
+            while (next && next.nodeType === Node.TEXT_NODE && next.textContent === '') {
+              next = next.nextSibling;
+            }
+            if (!next) {
+              const placeholderBr = document.createElement('br');
+              br.parentNode?.appendChild(placeholderBr);
             }
 
-            const targetRange = document.createRange();
-            targetRange.selectNodeContents(p);
-            targetRange.collapse(true);
-            const sel = window.getSelection();
-            if (sel) {
-              sel.removeAllRanges();
-              sel.addRange(targetRange);
-            }
+            const newRange = document.createRange();
+            newRange.setStartAfter(br);
+            newRange.collapse(true);
+            sel.removeAllRanges();
+            sel.addRange(newRange);
+
             handleWysiwygInput();
             checkActiveFormats();
             return;
           }
 
-          const sel = window.getSelection();
-          if (!sel || sel.rangeCount === 0) return;
-          const range = sel.getRangeAt(0);
+          const isTaskItem =
+            targetLi.classList.contains('task-list-item') ||
+            targetLi.querySelector('input[type="checkbox"]') !== null ||
+            targetLi.closest('ul.contains-task-list') !== null;
 
+          const clone = targetLi.cloneNode(true) as HTMLElement;
+          clone.querySelectorAll('input[type="checkbox"]').forEach((cb) => cb.remove());
+          const textContent = clone.textContent?.replace(/[\r\n\s\u00A0\u200B-\u200D\uFEFF]/g, '') || '';
+
+          // If list item is empty (e.g. Enter pressed twice in list): CANCEL/EXIT LIST
+          if (textContent === '') {
+            const parentList = targetLi.closest('ul, ol');
+            const p = document.createElement('p');
+            p.innerHTML = '<br>';
+
+            if (parentList) {
+              const allLis = Array.from(parentList.children) as HTMLElement[];
+              const currIdx = allLis.indexOf(targetLi);
+              const lisBefore = allLis.slice(0, currIdx);
+              const lisAfter = allLis.slice(currIdx + 1);
+
+              if (lisAfter.length > 0) {
+                const trailingList = document.createElement(parentList.tagName) as HTMLElement;
+                trailingList.className = parentList.className;
+                lisAfter.forEach((li) => trailingList.appendChild(li));
+                if (parentList.nextSibling) {
+                  parentList.parentNode?.insertBefore(trailingList, parentList.nextSibling);
+                } else {
+                  parentList.parentNode?.appendChild(trailingList);
+                }
+              }
+
+              if (parentList.nextSibling) {
+                parentList.parentNode?.insertBefore(p, parentList.nextSibling);
+              } else {
+                parentList.parentNode?.appendChild(p);
+              }
+
+              targetLi.remove();
+
+              if (lisBefore.length === 0) {
+                parentList.remove();
+              }
+            } else if (wysiwygRef.current) {
+              targetLi.parentNode?.replaceChild(p, targetLi);
+            }
+
+            const targetRange = document.createRange();
+            targetRange.selectNodeContents(p);
+            targetRange.collapse(true);
+            sel.removeAllRanges();
+            sel.addRange(targetRange);
+
+            handleWysiwygInput();
+            checkActiveFormats();
+            return;
+          }
+
+          // Non-empty list item: split or continue
           const preRange = document.createRange();
-          preRange.selectNodeContents(blockNode);
+          preRange.selectNodeContents(targetLi);
           preRange.setEnd(range.startContainer, range.startOffset);
           const beforeFrag = preRange.cloneContents();
 
           const postRange = document.createRange();
-          postRange.selectNodeContents(blockNode);
+          postRange.selectNodeContents(targetLi);
           postRange.setStart(range.endContainer, range.endOffset);
           const afterFrag = postRange.cloneContents();
 
           const beforeTemp = document.createElement('div');
           beforeTemp.appendChild(beforeFrag.cloneNode(true));
           beforeTemp.querySelectorAll('input[type="checkbox"]').forEach((c) => c.remove());
-          const beforeText = beforeTemp.textContent?.replace(/[\r\n\s\u200B-\u200D\uFEFF]/g, '') || '';
+          const beforeText = beforeTemp.textContent?.replace(/[\r\n\s\u00A0\u200B-\u200D\uFEFF]/g, '') || '';
 
           const afterTemp = document.createElement('div');
           afterTemp.appendChild(afterFrag.cloneNode(true));
           afterTemp.querySelectorAll('input[type="checkbox"]').forEach((c) => c.remove());
-          const afterText = afterTemp.textContent?.replace(/[\r\n\s\u200B-\u200D\uFEFF]/g, '') || '';
+          const afterText = afterTemp.textContent?.replace(/[\r\n\s\u00A0\u200B-\u200D\uFEFF]/g, '') || '';
 
           const newLi = document.createElement('li');
           if (isTaskItem) {
@@ -675,11 +1073,16 @@ export function useWysiwygHandlers({
 
           if (beforeText === '') {
             if (isTaskItem) {
-              newLi.innerHTML = '<input type="checkbox" />&nbsp;';
+              const cb = document.createElement('input');
+              cb.type = 'checkbox';
+              cb.setAttribute('contenteditable', 'false');
+              newLi.appendChild(cb);
+              newLi.appendChild(document.createTextNode(' '));
+              newLi.appendChild(document.createElement('br'));
             } else {
               newLi.innerHTML = '<br>';
             }
-            blockNode.parentNode?.insertBefore(newLi, blockNode);
+            targetLi.parentNode?.insertBefore(newLi, targetLi);
             handleWysiwygInput();
             checkActiveFormats();
             return;
@@ -687,20 +1090,29 @@ export function useWysiwygHandlers({
 
           if (afterText === '') {
             if (isTaskItem) {
-              newLi.innerHTML = '<input type="checkbox" />&nbsp;';
+              const cb = document.createElement('input');
+              cb.type = 'checkbox';
+              cb.setAttribute('contenteditable', 'false');
+              newLi.appendChild(cb);
+              newLi.appendChild(document.createTextNode(' '));
+              newLi.appendChild(document.createElement('br'));
             } else {
               newLi.innerHTML = '<br>';
             }
 
-            if (blockNode.nextSibling) {
-              blockNode.parentNode?.insertBefore(newLi, blockNode.nextSibling);
+            if (targetLi.nextSibling) {
+              targetLi.parentNode?.insertBefore(newLi, targetLi.nextSibling);
             } else {
-              blockNode.parentNode?.appendChild(newLi);
+              targetLi.parentNode?.appendChild(newLi);
             }
 
             const targetRange = document.createRange();
-            targetRange.selectNodeContents(newLi);
-            targetRange.collapse(false);
+            if (isTaskItem && newLi.childNodes.length > 2) {
+              targetRange.setStart(newLi.childNodes[2], 0);
+            } else {
+              targetRange.selectNodeContents(newLi);
+              targetRange.collapse(true);
+            }
             sel.removeAllRanges();
             sel.addRange(targetRange);
             handleWysiwygInput();
@@ -708,26 +1120,32 @@ export function useWysiwygHandlers({
             return;
           }
 
-          blockNode.innerHTML = '';
+          // Splitting item in the middle
+          targetLi.innerHTML = '';
           if (isTaskItem) {
             const keepCb = document.createElement('input');
             keepCb.type = 'checkbox';
-            const origCb = (blockNode as HTMLElement).querySelector('input[type="checkbox"]') as HTMLInputElement;
-            if (origCb && origCb.checked) keepCb.checked = true;
-            blockNode.appendChild(keepCb);
-            blockNode.appendChild(document.createTextNode(' '));
+            keepCb.setAttribute('contenteditable', 'false');
+            const origCb = (clone as HTMLElement).querySelector('input[type="checkbox"]') as HTMLInputElement;
+            if (origCb && (origCb.checked || origCb.hasAttribute('checked'))) {
+              keepCb.checked = true;
+              keepCb.setAttribute('checked', 'checked');
+            }
+            targetLi.appendChild(keepCb);
+            targetLi.appendChild(document.createTextNode(' '));
           }
           const beforeNodes = Array.from(beforeFrag.childNodes).filter(
             (n) => !(n.nodeType === Node.ELEMENT_NODE && (n as HTMLElement).tagName === 'INPUT')
           );
-          beforeNodes.forEach((node) => blockNode.appendChild(node));
-          if (!blockNode.textContent?.trim() && !isTaskItem) {
-            blockNode.innerHTML = '<br>';
+          beforeNodes.forEach((node) => targetLi.appendChild(node));
+          if (!targetLi.textContent?.trim() && !isTaskItem) {
+            targetLi.innerHTML = '<br>';
           }
 
           if (isTaskItem) {
             const newCb = document.createElement('input');
             newCb.type = 'checkbox';
+            newCb.setAttribute('contenteditable', 'false');
             newLi.appendChild(newCb);
             newLi.appendChild(document.createTextNode(' '));
           }
@@ -739,10 +1157,10 @@ export function useWysiwygHandlers({
             newLi.appendChild(document.createElement('br'));
           }
 
-          if (blockNode.nextSibling) {
-            blockNode.parentNode?.insertBefore(newLi, blockNode.nextSibling);
+          if (targetLi.nextSibling) {
+            targetLi.parentNode?.insertBefore(newLi, targetLi.nextSibling);
           } else {
-            blockNode.parentNode?.appendChild(newLi);
+            targetLi.parentNode?.appendChild(newLi);
           }
 
           const targetRange = document.createRange();
@@ -759,205 +1177,218 @@ export function useWysiwygHandlers({
           return;
         }
 
-        const sel = window.getSelection();
-        if (
-          sel &&
-          sel.rangeCount > 0 &&
-          tag !== 'H1' &&
-          tag !== 'H2' &&
-          tag !== 'H3' &&
-          tag !== 'BLOCKQUOTE' &&
-          tag !== 'PRE' &&
-          tag !== 'CODE'
-        ) {
-          const range = sel.getRangeAt(0);
+        // 2. Blockquote Handling
+        const targetBq = blockNode.tagName.toUpperCase() === 'BLOCKQUOTE' ? blockNode : blockNode.closest('blockquote');
+        if (targetBq) {
+          e.preventDefault();
+          const totalBqText = targetBq.textContent?.replace(/[\r\n\s\u00A0\u200B-\u200D\uFEFF]/g, '') || '';
+          const innerBlock = blockNode !== targetBq ? blockNode : null;
+          const innerText = innerBlock
+            ? innerBlock.textContent?.replace(/[\r\n\s\u00A0\u200B-\u200D\uFEFF]/g, '') || ''
+            : totalBqText;
 
+          // If line is empty or whole blockquote is empty: EXIT/CANCEL BLOCKQUOTE
+          if (innerText === '' || totalBqText === '') {
+            const p = document.createElement('p');
+            p.innerHTML = '<br>';
+
+            if (innerBlock && innerBlock !== targetBq) {
+              innerBlock.remove();
+            }
+
+            const remainingText = targetBq.textContent?.replace(/[\r\n\s\u00A0\u200B-\u200D\uFEFF]/g, '') || '';
+            if (remainingText === '') {
+              targetBq.parentNode?.replaceChild(p, targetBq);
+            } else {
+              if (targetBq.nextSibling) {
+                targetBq.parentNode?.insertBefore(p, targetBq.nextSibling);
+              } else {
+                targetBq.parentNode?.appendChild(p);
+              }
+            }
+
+            const targetRange = document.createRange();
+            targetRange.selectNodeContents(p);
+            targetRange.collapse(true);
+            sel.removeAllRanges();
+            sel.addRange(targetRange);
+
+            handleWysiwygInput();
+            checkActiveFormats();
+            return;
+          }
+
+          // Non-empty line in blockquote
+          const activeBlock = innerBlock || targetBq;
+          const postRange = document.createRange();
+          postRange.selectNodeContents(activeBlock);
+          postRange.setStart(range.endContainer, range.endOffset);
+          const afterText = postRange.toString().replace(/[\r\n\s\u00A0\u200B-\u200D\uFEFF]/g, '');
+
+          const newP = document.createElement('p');
+          if (afterText === '') {
+            newP.innerHTML = '<br>';
+          } else {
+            newP.appendChild(postRange.extractContents());
+            if (!newP.textContent?.trim()) newP.innerHTML = '<br>';
+          }
+
+          if (innerBlock) {
+            if (innerBlock.nextSibling) {
+              innerBlock.parentNode?.insertBefore(newP, innerBlock.nextSibling);
+            } else {
+              targetBq.appendChild(newP);
+            }
+          } else {
+            targetBq.appendChild(newP);
+          }
+
+          const targetRange = document.createRange();
+          targetRange.selectNodeContents(newP);
+          targetRange.collapse(true);
+          sel.removeAllRanges();
+          sel.addRange(targetRange);
+
+          handleWysiwygInput();
+          checkActiveFormats();
+          return;
+        }
+
+        // 3. Heading Handling (H1-H6)
+        const headingBlock = blockNode.closest('h1, h2, h3, h4, h5, h6') as HTMLElement | null;
+        if (headingBlock) {
+          e.preventDefault();
+          const text = headingBlock.textContent?.replace(/[\r\n\s\u00A0\u200B-\u200D\uFEFF]/g, '') || '';
+
+          if (text === '') {
+            // Empty heading -> convert to standard paragraph
+            const p = document.createElement('p');
+            p.innerHTML = '<br>';
+            headingBlock.parentNode?.replaceChild(p, headingBlock);
+            const r = document.createRange();
+            r.selectNodeContents(p);
+            r.collapse(true);
+            sel.removeAllRanges();
+            sel.addRange(r);
+            handleWysiwygInput();
+            checkActiveFormats();
+            return;
+          }
+
+          const postRange = document.createRange();
+          postRange.selectNodeContents(headingBlock);
+          postRange.setStart(range.endContainer, range.endOffset);
+          const afterText = postRange.toString().replace(/[\r\n\s\u00A0\u200B-\u200D\uFEFF]/g, '');
+
+          const p = document.createElement('p');
+          if (afterText === '') {
+            p.innerHTML = '<br>';
+          } else {
+            p.appendChild(postRange.extractContents());
+          }
+
+          if (headingBlock.nextSibling) {
+            headingBlock.parentNode?.insertBefore(p, headingBlock.nextSibling);
+          } else {
+            headingBlock.parentNode?.appendChild(p);
+          }
+
+          const r = document.createRange();
+          r.selectNodeContents(p);
+          r.collapse(true);
+          sel.removeAllRanges();
+          sel.addRange(r);
+          handleWysiwygInput();
+          checkActiveFormats();
+          return;
+        }
+
+        // 4. Code Block Handling
+        const preBlock = blockNode.closest('pre') as HTMLElement | null;
+        if (preBlock) {
+          e.preventDefault();
+          const text = preBlock.textContent?.replace(/[\r\n\s\u00A0\u200B-\u200D\uFEFF]/g, '') || '';
+          const preRange = document.createRange();
+          preRange.selectNodeContents(preBlock);
+          preRange.setEnd(range.startContainer, range.startOffset);
+          const textBefore = preRange.toString();
+          const isAtEmptyLineInCode = textBefore.endsWith('\n\n') || textBefore.endsWith('\r\n\r\n');
+
+          if (text === '' || isAtEmptyLineInCode || e.shiftKey || e.ctrlKey || e.metaKey) {
+            const p = document.createElement('p');
+            p.innerHTML = '<br>';
+            if (preBlock.nextSibling) {
+              preBlock.parentNode?.insertBefore(p, preBlock.nextSibling);
+            } else {
+              preBlock.parentNode?.appendChild(p);
+            }
+            const r = document.createRange();
+            r.selectNodeContents(p);
+            r.collapse(true);
+            sel.removeAllRanges();
+            sel.addRange(r);
+            handleWysiwygInput();
+            checkActiveFormats();
+            return;
+          }
+
+          // Insert literal newline in code block
+          const codeEl = preBlock.querySelector('code') || preBlock;
+          const newlineNode = document.createTextNode('\n');
+          range.deleteContents();
+          range.insertNode(newlineNode);
+          range.setStartAfter(newlineNode);
+          range.collapse(true);
+          sel.removeAllRanges();
+          sel.addRange(range);
+          handleWysiwygInput();
+          return;
+        }
+
+        // 5. In-Paragraph Markdown Pattern conversions on Enter
+        const tag = blockNode.tagName.toUpperCase();
+        if (tag === 'P' || tag === 'DIV') {
           const preRange = document.createRange();
           preRange.selectNodeContents(blockNode);
           preRange.setEnd(range.startContainer, range.startOffset);
-          const textBefore = preRange.toString();
+          const textBefore = preRange.toString().replace(/\u00A0/g, ' ');
 
-          const postRange = document.createRange();
-          postRange.selectNodeContents(blockNode);
-          postRange.setStart(range.endContainer, range.endOffset);
-
-          // 1) Numbered List Pattern
-          const numMatch = textBefore.match(/^(\s*)(\d+)([.)])\s*(.*)$/);
-          if (numMatch) {
+          // Horizontal rule on Enter
+          if (/^(\s*(?:---|---|\*\*\*|___))\s*$/.test(textBefore)) {
             e.preventDefault();
-            const fullPrefixMatch = textBefore.match(/^(\s*\d+[.)]\s*)/);
-            const prefixLen = fullPrefixMatch ? fullPrefixMatch[0].length : 3;
-
-            const beforeFrag = preRange.cloneContents();
-            stripLeadingPrefixFromFragment(beforeFrag, prefixLen);
-
-            const afterFrag = postRange.cloneContents();
-
-            const ol = document.createElement('ol');
-            const firstLi = document.createElement('li');
-            firstLi.appendChild(beforeFrag);
-            if (!firstLi.textContent?.trim() && firstLi.childNodes.length === 0) {
-              firstLi.innerHTML = '<br>';
-            }
-
-            const secondLi = document.createElement('li');
-            secondLi.appendChild(afterFrag);
-            if (!secondLi.textContent?.trim() && secondLi.childNodes.length === 0) {
-              secondLi.innerHTML = '<br>';
-            }
-
-            ol.appendChild(firstLi);
-            ol.appendChild(secondLi);
-
-            blockNode.parentNode?.replaceChild(ol, blockNode);
-
-            const targetRange = document.createRange();
-            targetRange.selectNodeContents(secondLi);
-            targetRange.collapse(true);
+            const hr = document.createElement('hr');
+            const p = document.createElement('p');
+            p.innerHTML = '<br>';
+            blockNode.parentNode?.insertBefore(hr, blockNode);
+            blockNode.parentNode?.insertBefore(p, blockNode);
+            blockNode.remove();
+            const r = document.createRange();
+            r.selectNodeContents(p);
+            r.collapse(true);
             sel.removeAllRanges();
-            sel.addRange(targetRange);
-
+            sel.addRange(r);
             handleWysiwygInput();
             checkActiveFormats();
             return;
           }
 
-          // 2) Bullet List Pattern
-          const bulletMatch = textBefore.match(/^(\s*)([-*+•])\s*(.*)$/);
-          if (bulletMatch) {
-            e.preventDefault();
-            const fullPrefixMatch = textBefore.match(/^(\s*[-*+•]\s*)/);
-            const prefixLen = fullPrefixMatch ? fullPrefixMatch[0].length : 2;
-
-            const beforeFrag = preRange.cloneContents();
-            stripLeadingPrefixFromFragment(beforeFrag, prefixLen);
-
-            const afterFrag = postRange.cloneContents();
-
-            const ul = document.createElement('ul');
-            const firstLi = document.createElement('li');
-            firstLi.appendChild(beforeFrag);
-            if (!firstLi.textContent?.trim() && firstLi.childNodes.length === 0) {
-              firstLi.innerHTML = '<br>';
-            }
-
-            const secondLi = document.createElement('li');
-            secondLi.appendChild(afterFrag);
-            if (!secondLi.textContent?.trim() && secondLi.childNodes.length === 0) {
-              secondLi.innerHTML = '<br>';
-            }
-
-            ul.appendChild(firstLi);
-            ul.appendChild(secondLi);
-
-            blockNode.parentNode?.replaceChild(ul, blockNode);
-
-            const targetRange = document.createRange();
-            targetRange.selectNodeContents(secondLi);
-            targetRange.collapse(true);
-            sel.removeAllRanges();
-            sel.addRange(targetRange);
-
-            handleWysiwygInput();
-            checkActiveFormats();
-            return;
-          }
-
-          // 3) Task List Pattern
-          const taskMatch = textBefore.match(/^(\s*(?:\[[\s_]?\]|[-*+]\s*\[[\s_]?\])\s*)/i);
-          if (taskMatch) {
-            e.preventDefault();
-            const prefixLen = taskMatch[0].length;
-
-            const beforeFrag = preRange.cloneContents();
-            stripLeadingPrefixFromFragment(beforeFrag, prefixLen);
-
-            const afterFrag = postRange.cloneContents();
-
-            const ul = document.createElement('ul');
-            ul.className = 'contains-task-list';
-
-            const firstLi = document.createElement('li');
-            firstLi.className = 'task-list-item';
-            const cb1 = document.createElement('input');
-            cb1.type = 'checkbox';
-            firstLi.appendChild(cb1);
-            firstLi.appendChild(document.createTextNode(' '));
-            firstLi.appendChild(beforeFrag);
-            if (firstLi.childNodes.length <= 2 && !firstLi.textContent?.trim()) {
-              firstLi.appendChild(document.createElement('br'));
-            }
-
-            const secondLi = document.createElement('li');
-            secondLi.className = 'task-list-item';
-            const cb2 = document.createElement('input');
-            cb2.type = 'checkbox';
-            secondLi.appendChild(cb2);
-            secondLi.appendChild(document.createTextNode(' '));
-            secondLi.appendChild(afterFrag);
-            if (secondLi.childNodes.length <= 2 && !secondLi.textContent?.trim()) {
-              secondLi.appendChild(document.createElement('br'));
-            }
-
-            ul.appendChild(firstLi);
-            ul.appendChild(secondLi);
-
-            blockNode.parentNode?.replaceChild(ul, blockNode);
-
-            const targetRange = document.createRange();
-            if (secondLi.childNodes.length > 2) {
-              targetRange.setStart(secondLi.childNodes[2], 0);
-            } else {
-              targetRange.selectNodeContents(secondLi);
-              targetRange.collapse(false);
-            }
-            sel.removeAllRanges();
-            sel.addRange(targetRange);
-
-            handleWysiwygInput();
-            checkActiveFormats();
-            return;
-          }
-        }
-
-        // Heading: Enter converts new line to <p>
-        if (tag === 'H1' || tag === 'H2' || tag === 'H3') {
-          const sel = window.getSelection();
-          if (sel && sel.rangeCount > 0) {
-            const range = sel.getRangeAt(0);
-            const text = blockNode.textContent?.replace(/[\r\n\s\u200B-\u200D\uFEFF]/g, '') || '';
-
-            if (text === '') {
+          // Markdown Table on Enter
+          if (/^\s*\|.+?\|\s*$/.test(textBefore)) {
+            const table = createMarkdownTableFromHeader(textBefore);
+            if (table) {
               e.preventDefault();
               const p = document.createElement('p');
               p.innerHTML = '<br>';
-              blockNode.parentNode?.replaceChild(p, blockNode);
+              blockNode.parentNode?.insertBefore(table, blockNode);
+              blockNode.parentNode?.insertBefore(p, blockNode);
+              blockNode.remove();
+              const firstTd = table.querySelector('tbody td') as HTMLElement;
               const r = document.createRange();
-              r.selectNodeContents(p);
-              r.collapse(true);
-              sel.removeAllRanges();
-              sel.addRange(r);
-              handleWysiwygInput();
-              checkActiveFormats();
-              return;
-            }
-
-            const postRange = document.createRange();
-            postRange.selectNodeContents(blockNode);
-            postRange.setStart(range.endContainer, range.endOffset);
-            const afterText = postRange.toString().replace(/[\r\n\s\u200B-\u200D\uFEFF]/g, '');
-
-            if (afterText === '') {
-              e.preventDefault();
-              const p = document.createElement('p');
-              p.innerHTML = '<br>';
-              if (blockNode.nextSibling) {
-                blockNode.parentNode?.insertBefore(p, blockNode.nextSibling);
+              if (firstTd) {
+                r.selectNodeContents(firstTd);
               } else {
-                blockNode.parentNode?.appendChild(p);
+                r.selectNodeContents(p);
               }
-              const r = document.createRange();
-              r.selectNodeContents(p);
               r.collapse(true);
               sel.removeAllRanges();
               sel.addRange(r);
@@ -966,40 +1397,108 @@ export function useWysiwygHandlers({
               return;
             }
           }
-        }
 
-        // Blockquote
-        if (tag === 'BLOCKQUOTE') {
-          const text = blockNode.textContent?.trim() || '';
-          if (text === '') {
+          // Fenced Code block on Enter
+          const codeEnterMatch = textBefore.match(/^(\s*`{3}([a-zA-Z0-9_-]*))\s*$/);
+          if (codeEnterMatch) {
             e.preventDefault();
-            document.execCommand('formatBlock', false, '<p>');
-            checkActiveFormats();
-          }
-        }
-
-        // Code Block
-        if (tag === 'PRE' || tag === 'CODE') {
-          const text = blockNode.textContent?.replace(/[\r\n\s\u200B-\u200D\uFEFF]/g, '') || '';
-          const sel = window.getSelection();
-          let isAtEmptyLineInCode = false;
-
-          if (sel && sel.rangeCount > 0) {
-            const range = sel.getRangeAt(0);
-            const preRange = document.createRange();
-            preRange.selectNodeContents(blockNode);
-            preRange.setEnd(range.startContainer, range.startOffset);
-            const textBefore = preRange.toString();
-            if (textBefore.endsWith('\n') || textBefore.endsWith('\r')) {
-              isAtEmptyLineInCode = true;
+            const lang = codeEnterMatch[2] || '';
+            const pre = document.createElement('pre');
+            const code = document.createElement('code');
+            if (lang) {
+              code.className = `language-${lang}`;
+              code.setAttribute('data-language', lang);
             }
-          }
-
-          if (text === '' || isAtEmptyLineInCode || e.ctrlKey || e.metaKey) {
-            e.preventDefault();
-            document.execCommand('formatBlock', false, '<p>');
+            code.innerHTML = '<br>';
+            pre.appendChild(code);
+            const p = document.createElement('p');
+            p.innerHTML = '<br>';
+            blockNode.parentNode?.insertBefore(pre, blockNode);
+            blockNode.parentNode?.insertBefore(p, blockNode);
+            blockNode.remove();
+            const r = document.createRange();
+            r.selectNodeContents(code);
+            r.collapse(true);
+            sel.removeAllRanges();
+            sel.addRange(r);
             handleWysiwygInput();
             checkActiveFormats();
+            return;
+          }
+
+          let matchedFormat: string | null = null;
+          let prefixMatch: RegExpMatchArray | null = null;
+
+          // Check if paragraph started with markdown list marker
+          const taskMatch = textBefore.match(/^(\s*(?:[-*+•]\s*)?\[([ x_]?)\]\s*)(.*)$/i);
+          const numMatch = textBefore.match(/^(\s*\d+[.)-]\s*)(.*)$/);
+          const bulletMatch = textBefore.match(/^(\s*[-*+•]\s*)(.*)$/);
+
+          if (taskMatch) {
+            matchedFormat = 'task';
+            prefixMatch = taskMatch;
+          } else if (numMatch) {
+            matchedFormat = 'number';
+            prefixMatch = numMatch;
+          } else if (bulletMatch) {
+            matchedFormat = 'bullet';
+            prefixMatch = bulletMatch;
+          }
+
+          if (matchedFormat && prefixMatch) {
+            e.preventDefault();
+            const prefixLen = prefixMatch[1].length;
+            const itemText = prefixMatch[prefixMatch.length - 1];
+            const isInitialChecked = matchedFormat === 'task' && prefixMatch[2]?.toLowerCase() === 'x';
+
+            // Strip the prefix from preRange
+            stripLeadingPrefixFromFragment(preRange.cloneContents(), prefixLen);
+            const firstChild = blockNode.firstChild;
+            if (firstChild && firstChild.nodeType === Node.TEXT_NODE && firstChild.textContent) {
+              firstChild.textContent = firstChild.textContent.replace(
+                /^(\s*(?:(?:[-*+•]\s*)?\[[ x_]?\]|\d+[.)-]|[-*+•])\s*)/i,
+                ''
+              );
+            }
+
+            applyWysiwygBlockFormat(matchedFormat, {
+              nodes: [blockNode],
+              mode: 'apply',
+              checked: isInitialChecked,
+              caretPlacement: 'end',
+            });
+
+            // If user typed item text before pressing enter, create the subsequent item
+            if (itemText.trim()) {
+              const currentInfo = getCaretBlockAndOffset(wysiwygRef.current);
+              const currentLi = currentInfo?.blockNode?.closest('li');
+              if (currentLi && currentLi.parentElement) {
+                const nextLi = document.createElement('li');
+                if (matchedFormat === 'task') {
+                  nextLi.className = 'task-list-item';
+                  const cb = document.createElement('input');
+                  cb.type = 'checkbox';
+                  cb.setAttribute('contenteditable', 'false');
+                  nextLi.appendChild(cb);
+                  nextLi.appendChild(document.createTextNode(' '));
+                  nextLi.appendChild(document.createElement('br'));
+                } else {
+                  nextLi.innerHTML = '<br>';
+                }
+                currentLi.after(nextLi);
+
+                const targetRange = document.createRange();
+                targetRange.selectNodeContents(nextLi);
+                targetRange.collapse(false);
+                const s = window.getSelection();
+                if (s) {
+                  s.removeAllRanges();
+                  s.addRange(targetRange);
+                }
+                handleWysiwygInput();
+                checkActiveFormats();
+              }
+            }
             return;
           }
         }
@@ -1009,57 +1508,85 @@ export function useWysiwygHandlers({
         const info = getCaretBlockAndOffset(wysiwygRef.current);
         if (!info || !info.blockNode) return;
         const { blockNode, isAtStart } = info;
-        const tag = blockNode.tagName.toUpperCase();
 
-        if (isAtStart) {
-          if (tag === 'LI') {
-            e.preventDefault();
-            const parentList = blockNode.closest('ul, ol');
-            if (!parentList) return;
+        const targetLi = blockNode.tagName.toUpperCase() === 'LI' ? blockNode : blockNode.closest('li');
+        if (targetLi && isAtStart) {
+          e.preventDefault();
+          const parentList = targetLi.closest('ul, ol');
+          if (!parentList) return;
 
-            const clone = blockNode.cloneNode(true) as HTMLElement;
-            clone.querySelectorAll('input[type="checkbox"]').forEach((cb) => cb.remove());
+          const clone = targetLi.cloneNode(true) as HTMLElement;
+          clone.querySelectorAll('input[type="checkbox"]').forEach((cb) => cb.remove());
 
+          const p = document.createElement('p');
+          while (clone.firstChild) {
+            p.appendChild(clone.firstChild);
+          }
+          if (!p.textContent?.trim() && p.childNodes.length === 0) {
+            p.innerHTML = '<br>';
+          }
+
+          const allLis = Array.from(parentList.children) as HTMLElement[];
+          const currIdx = allLis.indexOf(targetLi);
+
+          const lisBefore = allLis.slice(0, currIdx);
+          const lisAfter = allLis.slice(currIdx + 1);
+
+          if (lisAfter.length > 0) {
+            const trailingList = document.createElement(parentList.tagName) as HTMLElement;
+            trailingList.className = parentList.className;
+            lisAfter.forEach((li) => trailingList.appendChild(li));
+            if (parentList.nextSibling) {
+              parentList.parentNode?.insertBefore(trailingList, parentList.nextSibling);
+            } else {
+              parentList.parentNode?.appendChild(trailingList);
+            }
+          }
+
+          if (lisBefore.length > 0) {
+            if (parentList.nextSibling) {
+              parentList.parentNode?.insertBefore(p, parentList.nextSibling);
+            } else {
+              parentList.parentNode?.appendChild(p);
+            }
+          } else {
+            parentList.parentNode?.insertBefore(p, parentList);
+          }
+
+          targetLi.remove();
+          if (lisBefore.length === 0) {
+            parentList.remove();
+          }
+
+          const range = document.createRange();
+          range.selectNodeContents(p);
+          range.collapse(true);
+          const sel = window.getSelection();
+          if (sel) {
+            sel.removeAllRanges();
+            sel.addRange(range);
+          }
+          handleWysiwygInput();
+          checkActiveFormats();
+          return;
+        }
+
+        const targetBq = blockNode.closest('blockquote');
+        const targetHeading = blockNode.closest('h1, h2, h3, h4, h5, h6');
+        const targetPre = blockNode.closest('pre');
+
+        if (isAtStart && (targetBq || targetHeading || targetPre)) {
+          e.preventDefault();
+          const blockToReplace = targetHeading || targetBq || targetPre;
+          if (blockToReplace) {
             const p = document.createElement('p');
-            while (clone.firstChild) {
-              p.appendChild(clone.firstChild);
+            while (blockToReplace.firstChild) {
+              p.appendChild(blockToReplace.firstChild);
             }
             if (!p.textContent?.trim() && p.childNodes.length === 0) {
               p.innerHTML = '<br>';
             }
-
-            const allLis = Array.from(parentList.children) as HTMLElement[];
-            const currIdx = allLis.indexOf(blockNode);
-
-            const lisBefore = allLis.slice(0, currIdx);
-            const lisAfter = allLis.slice(currIdx + 1);
-
-            if (lisAfter.length > 0) {
-              const trailingList = document.createElement(parentList.tagName) as HTMLElement;
-              trailingList.className = parentList.className;
-              lisAfter.forEach((li) => trailingList.appendChild(li));
-              if (parentList.nextSibling) {
-                parentList.parentNode?.insertBefore(trailingList, parentList.nextSibling);
-              } else {
-                parentList.parentNode?.appendChild(trailingList);
-              }
-            }
-
-            if (lisBefore.length > 0) {
-              if (parentList.nextSibling) {
-                parentList.parentNode?.insertBefore(p, parentList.nextSibling);
-              } else {
-                parentList.parentNode?.appendChild(p);
-              }
-            } else {
-              parentList.parentNode?.insertBefore(p, parentList);
-            }
-
-            blockNode.remove();
-            if (lisBefore.length === 0) {
-              parentList.remove();
-            }
-
+            blockToReplace.parentNode?.replaceChild(p, blockToReplace);
             const range = document.createRange();
             range.selectNodeContents(p);
             range.collapse(true);
@@ -1072,16 +1599,9 @@ export function useWysiwygHandlers({
             checkActiveFormats();
             return;
           }
-
-          if (['H1', 'H2', 'H3', 'BLOCKQUOTE', 'PRE', 'CODE'].includes(tag)) {
-            e.preventDefault();
-            document.execCommand('formatBlock', false, '<p>');
-            handleWysiwygInput();
-            checkActiveFormats();
-            return;
-          }
         }
 
+        const tag = blockNode.tagName.toUpperCase();
         if (tag === 'P' || tag === 'DIV') {
           const sel = window.getSelection();
           if (sel && sel.rangeCount > 0 && sel.isCollapsed) {
@@ -1091,7 +1611,7 @@ export function useWysiwygHandlers({
             preRange.setEnd(range.startContainer, range.startOffset);
             const textBefore = preRange.toString();
 
-            const prefixMatch = textBefore.match(/^(\s*(?:\d+[.)]|[-*+•])\s+)$/);
+            const prefixMatch = textBefore.match(/^(\s*(?:\d+[.)]|[-*+•]|>+|#{1,6})\s+)$/);
             if (prefixMatch) {
               e.preventDefault();
               preRange.deleteContents();

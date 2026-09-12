@@ -3,7 +3,7 @@ import { useEffect } from 'react';
 export interface ShortcutHandlers {
   onNewNote?: () => void;
   onToggleDarkMode?: () => void;
-  onToggleViewMode?: () => void;
+  onToggleEditorMode?: () => void;
   onSaveNote?: () => void;
   onSaveLocalFile?: () => void;
   onOpenLocalFile?: () => void;
@@ -63,10 +63,10 @@ export function useKeyboardShortcuts(handlers: ShortcutHandlers) {
         return;
       }
 
-      // Ctrl/Cmd + E -> Editor/Markdown
+      // Ctrl/Cmd + E -> Toggle WYSIWYG / Markdown Editor
       if (isCmdOrCtrl && keyLower === 'e') {
         e.preventDefault();
-        handlers.onToggleViewMode?.();
+        handlers.onToggleEditorMode?.();
         return;
       }
 

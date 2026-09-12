@@ -96,7 +96,6 @@ export interface SyncPullResponse {
 export type Theme = 'light' | 'dark' | 'system';
 
 export type EditorMode = 'wysiwyg' | 'markdown';
-export type ViewMode = EditorMode;
 
 export type SortField = 'updatedAt' | 'createdAt' | 'title';
 export type SortOrder = 'asc' | 'desc';

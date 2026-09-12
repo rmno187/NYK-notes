@@ -115,10 +115,21 @@ export function isNoteEmpty(note: Partial<Note> | null | undefined): boolean {
   if (!note) return true;
 
   const cleanTitle = (note.title || '').trim();
-  const cleanDescription = (note.description || '').trim();
+  if (cleanTitle !== '') return false;
 
-  // Strip HTML tags, whitespace, zero-width chars, and non-breaking spaces
-  const cleanContent = (note.content || '')
+  const cleanDescription = (note.description || '').trim();
+  if (cleanDescription !== '') return false;
+
+  if (note.images && note.images.length > 0) return false;
+
+  const rawContent = note.content || '';
+  if (!rawContent) return true;
+
+  // Fast check: if length is substantial (>150 chars), it is guaranteed not to be just empty whitespace or empty tags
+  if (rawContent.length > 150) return false;
+
+  // For short strings, check if only empty HTML tags or whitespace
+  const cleanContent = rawContent
     .replace(/&nbsp;/gi, '')
     .replace(/<br\s*\/?>/gi, '')
     .replace(/<p>\s*<\/p>/gi, '')
@@ -127,7 +138,7 @@ export function isNoteEmpty(note: Partial<Note> | null | undefined): boolean {
     .replace(/[\r\n\t\s\u200B-\u200D\uFEFF]/g, '')
     .trim();
 
-  return cleanTitle === '' && cleanContent === '' && cleanDescription === '';
+  return cleanContent === '';
 }
 
 /**

@@ -4,6 +4,7 @@ export interface ActiveFormats {
   bold: boolean;
   italic: boolean;
   underline: boolean;
+  strike: boolean;
   heading: boolean;
   h2: boolean;
   bullet: boolean;
@@ -19,6 +20,8 @@ export type FormatActionType =
   | 'bold'
   | 'italic'
   | 'underline'
+  | 'strike'
+  | 'clear'
   | 'heading'
   | 'h2'
   | 'code'
