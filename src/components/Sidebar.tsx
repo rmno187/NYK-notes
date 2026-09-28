@@ -16,7 +16,7 @@ import {
 import { Note, StorageMode, NoteType } from '../types';
 import { NotePreview } from './NotePreview';
 import { modKey } from '../lib/platform';
-import { isNoteEmpty } from '../lib/noteUtils';
+import { isNoteEmpty, normalizeTags } from '../lib/noteUtils';
 import { SyncStatusIndicator } from './SyncStatusIndicator';
 
 interface SidebarProps {
@@ -931,9 +931,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
                         )}
                       </div>
 
-                      {note.tags.length > 0 && (
+                      {normalizeTags(note.tags).length > 0 && (
                         <div className="flex items-center space-x-1 overflow-hidden max-w-[140px]">
-                          {note.tags
+                          {normalizeTags(note.tags)
                             .slice(0, 3)
                             .map((t) => (
                               <button
@@ -988,9 +988,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
                         )}
                       </div>
 
-                      {note.tags.length > 0 && (
+                      {normalizeTags(note.tags).length > 0 && (
                         <div className="flex items-center space-x-1 overflow-hidden max-w-[120px]">
-                          {note.tags
+                          {normalizeTags(note.tags)
                             .slice(0, 2)
                             .map((t) => (
                               <button

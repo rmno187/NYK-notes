@@ -14,7 +14,7 @@ import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { convertHtmlToMarkdown, parseMarkdownNote, formatBlogDate, cleanMarkdownBreaks } from './lib/markdown';
 import { saveNoteToLocalFolder, openLocalMarkdownFile } from './lib/localFileOperations';
 import { isMac, modSymbol } from './lib/platform';
-import { isNoteEmpty, slugify, syncNoteImagePathsOnRename, mergeNotes } from './lib/noteUtils';
+import { isNoteEmpty, slugify, syncNoteImagePathsOnRename, mergeNotes, normalizeTag, normalizeTags } from './lib/noteUtils';
 import { importNotesFromFiles } from './lib/importUtils';
 import { Sidebar } from './components/Sidebar';
 import { EditorPane } from './components/EditorPane';
@@ -204,7 +204,11 @@ export default function App() {
                   note.content.trim().startsWith('<p>') && note.content.includes('</p>')
                     ? convertHtmlToMarkdown(note.content)
                     : cleanMarkdownBreaks(note.content);
-                const cleanNote = { ...note, content: cleanedContent };
+                const cleanNote = {
+                  ...note,
+                  content: cleanedContent,
+                  tags: normalizeTags(note.tags),
+                };
                 idbNotes.push(cleanNote);
               }
             }
@@ -345,10 +349,13 @@ export default function App() {
     };
   }, [storageMode]);
 
-  // Compute all unique tags across notes
+  // Compute all unique tags across notes (always lowercase and deduplicated)
   const allTags = useMemo(() => {
     const tagSet = new Set<string>();
-    notes.forEach((n) => n.tags.forEach((t) => tagSet.add(t)));
+    notes.forEach((n) => {
+      if (n.deletedAt) return;
+      normalizeTags(n.tags).forEach((t) => tagSet.add(t));
+    });
     return Array.from(tagSet).sort();
   }, [notes]);
 
@@ -1016,7 +1023,7 @@ export default function App() {
         id: `note-${Date.now().toString(36)}`,
         title: title,
         content: content,
-        tags: selectedTag ? [selectedTag] : [],
+        tags: selectedTag ? [normalizeTag(selectedTag)] : [],
         createdAt: Date.now(),
         updatedAt: Date.now(),
         pinned: false,
@@ -1273,15 +1280,19 @@ export default function App() {
     setNotes((prev) => prev.filter((n) => !n.deletedAt));
   }, [notes, storageMode, directoryHandle]);
 
-  // Add Tag
+  // Add Tag (always lowercase and deduplicated)
   const handleAddTag = useCallback(
     (tag: string) => {
       if (!activeNoteId) return;
+      const cleanTag = normalizeTag(tag);
+      if (!cleanTag) return;
 
       setNotes((prev) =>
         prev.map((note) => {
-          if (note.id === activeNoteId && !note.tags.includes(tag)) {
-            const updated = { ...note, tags: [...note.tags, tag], updatedAt: Date.now() };
+          if (note.id === activeNoteId) {
+            const currentTags = normalizeTags(note.tags);
+            if (currentTags.includes(cleanTag)) return note;
+            const updated = { ...note, tags: [...currentTags, cleanTag], updatedAt: Date.now() };
             persistNote(updated);
             return updated;
           }
@@ -1296,13 +1307,14 @@ export default function App() {
   const handleRemoveTag = useCallback(
     (tag: string) => {
       if (!activeNoteId) return;
+      const cleanTag = normalizeTag(tag);
 
       setNotes((prev) =>
         prev.map((note) => {
           if (note.id === activeNoteId) {
             const updated = {
               ...note,
-              tags: note.tags.filter((t) => t !== tag),
+              tags: normalizeTags(note.tags).filter((t) => t !== cleanTag),
               updatedAt: Date.now(),
             };
             persistNote(updated);

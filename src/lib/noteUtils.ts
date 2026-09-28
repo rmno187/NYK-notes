@@ -1,6 +1,35 @@
 import { Note } from '../types';
 
 /**
+ * Normalizes a single tag string:
+ * Trims whitespace, removes leading '#' if present, and converts to lowercase.
+ */
+export function normalizeTag(tag: string | null | undefined): string {
+  if (!tag || typeof tag !== 'string') return '';
+  return tag.trim().replace(/^#/, '').toLowerCase();
+}
+
+/**
+ * Normalizes an array of tags:
+ * Trims whitespace, removes leading '#', converts to lowercase,
+ * filters empty values, and deduplicates (e.g. 'Test', 'test', 'tEst' -> ['test']).
+ */
+export function normalizeTags(tags?: (string | null | undefined)[]): string[] {
+  if (!tags || !Array.isArray(tags)) return [];
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const t of tags) {
+    if (!t) continue;
+    const clean = normalizeTag(t);
+    if (clean && !seen.has(clean)) {
+      seen.add(clean);
+      result.push(clean);
+    }
+  }
+  return result;
+}
+
+/**
  * Convert title or string to a clean URL-safe slug
  */
 export function slugify(text: string): string {
@@ -232,7 +261,7 @@ export function mergeNotes(existingNotes: Note[], incomingNotes: Note[]): Note[]
         localFolderName: base.localFolderName || other.localFolderName,
         localBackedUp: Boolean(base.localBackedUp || other.localBackedUp),
         images: base.images && base.images.length > 0 ? base.images : other.images,
-        tags: Array.from(new Set([...(base.tags || []), ...(other.tags || [])])),
+        tags: normalizeTags([...(base.tags || []), ...(other.tags || [])]),
         pinned: base.pinned ?? other.pinned,
         featured: base.featured ?? other.featured,
         type: base.type || other.type || 'note',
@@ -251,7 +280,10 @@ export function mergeNotes(existingNotes: Note[], incomingNotes: Note[]): Note[]
       };
     } else {
       // New incoming note
-      result.push(incoming);
+      result.push({
+        ...incoming,
+        tags: normalizeTags(incoming.tags),
+      });
     }
   }
 

@@ -1,7 +1,7 @@
 import React, { useRef, useState, useEffect } from 'react';
 import { X, Check, FolderOpen } from 'lucide-react';
 import { Note, EditorMode, StorageMode, Theme, NoteType } from '../../types';
-import { slugify, getNoteBaseName } from '../../lib/noteUtils';
+import { slugify, getNoteBaseName, normalizeTag, normalizeTags } from '../../lib/noteUtils';
 
 interface OptionsSlideoutProps {
   isOpen: boolean;
@@ -249,16 +249,17 @@ export const OptionsSlideout: React.FC<OptionsSlideoutProps> = ({
   if (!isOpen) return null;
 
   // Tags filter
-  const cleanTypedTag = tagInput.trim().replace(/^#/, '').toLowerCase();
-  const availableExistingTags = allTags.filter((t) => {
-    if (note.tags.includes(t)) return false;
+  const cleanTypedTag = normalizeTag(tagInput);
+  const normalizedNoteTags = normalizeTags(note.tags);
+  const availableExistingTags = normalizeTags(allTags).filter((t) => {
+    if (normalizedNoteTags.includes(t)) return false;
     if (!cleanTypedTag) return true;
-    return t.toLowerCase().includes(cleanTypedTag);
+    return t.includes(cleanTypedTag);
   });
 
   const handleAddTag = (tagToAdd: string) => {
-    const clean = tagToAdd.trim().replace(/^#/, '').toLowerCase();
-    if (clean && !note.tags.includes(clean)) {
+    const clean = normalizeTag(tagToAdd);
+    if (clean && !normalizedNoteTags.includes(clean)) {
       onAddTag(clean);
     }
     setTagInput('');
@@ -470,7 +471,7 @@ export const OptionsSlideout: React.FC<OptionsSlideoutProps> = ({
                       </div>
                     )}
 
-                    {cleanTypedTag && !note.tags.includes(cleanTypedTag) && (
+                    {cleanTypedTag && !normalizedNoteTags.includes(cleanTypedTag) && (
                       <button
                         type="button"
                         onClick={() => handleAddTag(cleanTypedTag)}
@@ -481,7 +482,7 @@ export const OptionsSlideout: React.FC<OptionsSlideoutProps> = ({
                     )}
 
                     {availableExistingTags.length === 0 &&
-                      (!cleanTypedTag || note.tags.includes(cleanTypedTag)) && (
+                      (!cleanTypedTag || normalizedNoteTags.includes(cleanTypedTag)) && (
                         <div className="px-3 py-2 text-xs text-neutral-400 dark:text-neutral-600">
                           Type a tag to create one
                         </div>
@@ -492,9 +493,9 @@ export const OptionsSlideout: React.FC<OptionsSlideoutProps> = ({
             </div>
 
             {/* Current Tags */}
-            {note.tags.length > 0 ? (
+            {normalizedNoteTags.length > 0 ? (
               <div className="flex flex-wrap gap-x-3 gap-y-2">
-                {note.tags.map((tag) => (
+                {normalizedNoteTags.map((tag) => (
                   <span key={tag} className="inline-flex items-center gap-1 text-xs text-black dark:text-white">
                     <span className="underline underline-offset-2 decoration-neutral-300 dark:decoration-neutral-700">
                       {tag}

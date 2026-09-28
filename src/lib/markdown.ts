@@ -1,7 +1,7 @@
 import { Marked } from 'marked';
 import TurndownService from 'turndown';
 import { Note, NoteType, NoteImage } from '../types';
-import { slugify } from './noteUtils';
+import { slugify, normalizeTag, normalizeTags } from './noteUtils';
 
 const marked = new Marked({
   gfm: true,
@@ -229,10 +229,11 @@ function parseTagsValue(value: string): string[] {
   if (!value) return [];
   const cleanVal = value.replace(/^\[|\]$/g, '').trim();
   if (!cleanVal) return [];
-  return cleanVal
+  const list = cleanVal
     .split(',')
-    .map((t) => t.trim().replace(/^['"]|['"]$/g, '').replace(/^#/, ''))
+    .map((t) => t.trim().replace(/^['"]|['"]$/g, ''))
     .filter(Boolean);
+  return normalizeTags(list);
 }
 
 /**
@@ -428,7 +429,7 @@ export function parseMarkdownNote(rawContent: string, defaultFileName?: string) 
 
   // Extract inline #hashtags from content (e.g., #project #todo)
   const inlineTags = extractHashtags(content);
-  const combinedTags = Array.from(new Set([...tags, ...inlineTags]));
+  const combinedTags = normalizeTags([...tags, ...inlineTags]);
 
   return {
     id,
@@ -463,6 +464,7 @@ export function serializeNoteToMarkdown(
   if (typeof noteOrTitle === 'object' && noteOrTitle !== null) {
     const note = noteOrTitle;
     const cleanContent = cleanMarkdownBreaks(note.content || '');
+    const cleanTags = normalizeTags(note.tags);
 
     if (note.type === 'project') {
       const slugVal = note.slug || slugify(note.title || 'untitled');
@@ -480,7 +482,7 @@ export function serializeNoteToMarkdown(
         `year: ${yearVal}`,
         ...(note.url ? [`url: ${note.url}`] : []),
         ...(note.github ? [`github: ${note.github}`] : []),
-        ...(note.tags && note.tags.length > 0 ? [`tags: [${note.tags.map((t) => `"${t}"`).join(', ')}]`] : []),
+        ...(cleanTags.length > 0 ? [`tags: [${cleanTags.map((t) => `"${t}"`).join(', ')}]`] : []),
         `type: project`,
         `order: ${orderVal}`,
         '---',
@@ -498,7 +500,7 @@ export function serializeNoteToMarkdown(
         `description: "${(note.description || '').replace(/"/g, '\\"')}"`,
         `author: "${(note.author || '').replace(/"/g, '\\"')}"`,
         ...(note.project ? [`project: ${note.project}`] : []),
-        `tags: [${(note.tags || []).map((t) => `"${t}"`).join(', ')}]`,
+        `tags: [${cleanTags.map((t) => `"${t}"`).join(', ')}]`,
         `featured: ${Boolean(note.featured)}`,
         `type: post`,
         '---',
@@ -510,7 +512,7 @@ export function serializeNoteToMarkdown(
     const lines = [
       '---',
       `title: "${(note.title || '').replace(/"/g, '\\"')}"`,
-      `tags: [${(note.tags || []).map((t) => `"${t}"`).join(', ')}]`,
+      `tags: [${cleanTags.map((t) => `"${t}"`).join(', ')}]`,
       `pinned: ${Boolean(note.pinned)}`,
       '---',
       '',
@@ -519,7 +521,7 @@ export function serializeNoteToMarkdown(
   }
 
   const title = typeof noteOrTitle === 'string' ? noteOrTitle : '';
-  const tags = tagsArg || [];
+  const tags = normalizeTags(tagsArg);
   const pinned = Boolean(pinnedArg);
   const content = cleanMarkdownBreaks(contentArg || '');
 
@@ -543,13 +545,11 @@ export function extractHashtags(text: string): string[] {
   const matches = text.match(/(?:^|\s)#([a-zA-Z0-9_-]+)(?=\s|$)/g);
   if (!matches) return [];
 
-  return Array.from(
-    new Set(
-      matches
-        .map((m) => m.trim().replace(/^#/, ''))
-        .filter((tag) => !/^\d+$/.test(tag)) // Ignore pure numbers like #123
-    )
-  );
+  const rawTags = matches
+    .map((m) => m.trim().replace(/^#/, ''))
+    .filter((tag) => !/^\d+$/.test(tag)); // Ignore pure numbers like #123
+
+  return normalizeTags(rawTags);
 }
 
 /**
