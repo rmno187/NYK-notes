@@ -1,6 +1,6 @@
 import JSZip from 'jszip';
 import { Note, NoteImage } from '../types';
-import { serializeNoteToMarkdown, parseMarkdownNote } from './markdown';
+import { serializeNoteToMarkdown, parseMarkdownNote, cleanMarkdownBreaks } from './markdown';
 import { dataUrlToBlob } from './imageUtils';
 import { getNoteBaseName } from './noteUtils';
 
@@ -237,7 +237,7 @@ export async function downloadNoteWithImagesZip(
 ): Promise<void> {
   const zip = new JSZip();
   const fileName = fileNameArg || generateNoteFilename(note);
-  const markdownContent = markdownContentArg || serializeNoteToMarkdown(note);
+  const markdownContent = cleanMarkdownBreaks(markdownContentArg || serializeNoteToMarkdown(note));
 
   // Add the markdown file
   zip.file(fileName, markdownContent);
@@ -268,7 +268,8 @@ export async function downloadNoteWithImagesZip(
  * Triggers a native browser file download of markdown content
  */
 export function downloadMarkdownFile(fileName: string, content: string): void {
-  const blob = new Blob([content], { type: 'text/markdown;charset=utf-8' });
+  const cleanContent = cleanMarkdownBreaks(content);
+  const blob = new Blob([cleanContent], { type: 'text/markdown;charset=utf-8' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;

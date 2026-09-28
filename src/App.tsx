@@ -11,7 +11,7 @@ import {
 } from './lib/storage';
 import { syncManager } from './lib/vercelSync/syncManager';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
-import { convertHtmlToMarkdown, parseMarkdownNote, formatBlogDate } from './lib/markdown';
+import { convertHtmlToMarkdown, parseMarkdownNote, formatBlogDate, cleanMarkdownBreaks } from './lib/markdown';
 import { saveNoteToLocalFolder, openLocalMarkdownFile } from './lib/localFileOperations';
 import { isMac, modSymbol } from './lib/platform';
 import { isNoteEmpty, slugify, syncNoteImagePathsOnRename, mergeNotes } from './lib/noteUtils';
@@ -200,10 +200,11 @@ export default function App() {
               } else if (isNoteEmpty(note) && !note.deletedAt) {
                 await deleteIndexedDBNote(note.id);
               } else {
-                const cleanNote =
+                const cleanedContent =
                   note.content.trim().startsWith('<p>') && note.content.includes('</p>')
-                    ? { ...note, content: convertHtmlToMarkdown(note.content) }
-                    : note;
+                    ? convertHtmlToMarkdown(note.content)
+                    : cleanMarkdownBreaks(note.content);
+                const cleanNote = { ...note, content: cleanedContent };
                 idbNotes.push(cleanNote);
               }
             }

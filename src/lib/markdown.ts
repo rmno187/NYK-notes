@@ -84,16 +84,24 @@ turndown.addRule('headings', {
   },
 });
 
-// Add rule to preserve empty paragraphs / blank lines in Turndown
+// Add rule to handle empty paragraphs / blank lines in Turndown without emitting <br>
 turndown.addRule('emptyParagraphs', {
   filter: (node) => {
     if (node.nodeName !== 'P') return false;
     const el = node as HTMLElement;
     const inner = el.innerHTML.trim().toLowerCase();
     const text = el.textContent?.replace(/[\r\n\s\u00A0\u200B-\u200D\uFEFF]/g, '') || '';
-    return text === '' && (inner === '' || inner === '<br>' || inner === '<br/>' || inner === '<br />' || inner === '&nbsp;');
+    return (
+      text === '' &&
+      (inner === '' ||
+        inner === '<br>' ||
+        inner === '<br/>' ||
+        inner === '<br />' ||
+        inner === '&nbsp;' ||
+        /^<br\s*\/?>$/i.test(inner))
+    );
   },
-  replacement: () => '\n\n<br>\n\n',
+  replacement: () => '',
 });
 
 // Add rule for task lists checkbox inputs
@@ -180,6 +188,25 @@ export function formatBlogDate(timestamp: number = Date.now()): string {
 }
 
 /**
+ * Cleans spurious <br> HTML tags from markdown text.
+ * Prevents literal '<br>' strings from polluting markdown files and display views
+ * when users press Enter multiple times or when HTML is converted to markdown.
+ */
+export function cleanMarkdownBreaks(markdownText: string): string {
+  if (!markdownText) return '';
+  return markdownText
+    // Remove standalone <br> or <br/> or <br /> lines (including when surrounded by whitespace or newlines)
+    .replace(/(?:^[ \t]*<br\s*\/?>[ \t]*(?:\r?\n|$))+/gim, '')
+    .replace(/(?:\r?\n[ \t]*<br\s*\/?>[ \t]*(?=\r?\n|$))+/gi, '')
+    // Inline <br> tags followed by newline: convert to standard markdown line break (two spaces + newline)
+    .replace(/[ \t]*<br\s*\/?>[ \t]*\r?\n/gi, '  \n')
+    // Inline <br> tags without newline: convert to standard markdown line break
+    .replace(/[ \t]*<br\s*\/?>[ \t]*/gi, '  \n')
+    // Normalize excessive blank lines (more than 2 consecutive newlines)
+    .replace(/\n{3,}/g, '\n\n');
+}
+
+/**
  * Converts HTML string back to Markdown
  */
 export function convertHtmlToMarkdown(html: string): string {
@@ -187,10 +214,11 @@ export function convertHtmlToMarkdown(html: string): string {
   try {
     // Un-nest <p> tags inside <li> to prevent unwanted list indentation artifacts
     const cleanedHtml = html.replace(/<li([^>]*)>\s*<p>(.*?)<\/p>\s*<\/li>/gis, '<li$1>$2</li>');
-    return turndown.turndown(cleanedHtml);
+    const result = turndown.turndown(cleanedHtml);
+    return cleanMarkdownBreaks(result);
   } catch (err) {
     console.error('Turndown error:', err);
-    return html;
+    return cleanMarkdownBreaks(html);
   }
 }
 
@@ -394,6 +422,8 @@ export function parseMarkdownNote(rawContent: string, defaultFileName?: string) 
   // Clean legacy raw HTML content strings if necessary
   if (content.trim().startsWith('<p>') && content.includes('</p>')) {
     content = convertHtmlToMarkdown(content);
+  } else {
+    content = cleanMarkdownBreaks(content);
   }
 
   // Extract inline #hashtags from content (e.g., #project #todo)
@@ -432,6 +462,8 @@ export function serializeNoteToMarkdown(
 ): string {
   if (typeof noteOrTitle === 'object' && noteOrTitle !== null) {
     const note = noteOrTitle;
+    const cleanContent = cleanMarkdownBreaks(note.content || '');
+
     if (note.type === 'project') {
       const slugVal = note.slug || slugify(note.title || 'untitled');
       const statusVal = note.status || 'Active';
@@ -454,7 +486,7 @@ export function serializeNoteToMarkdown(
         '---',
         '',
       ];
-      return lines.join('\n') + (note.content || '');
+      return lines.join('\n') + cleanContent;
     }
 
     if (note.type === 'post') {
@@ -472,7 +504,7 @@ export function serializeNoteToMarkdown(
         '---',
         '',
       ];
-      return lines.join('\n') + (note.content || '');
+      return lines.join('\n') + cleanContent;
     }
 
     const lines = [
@@ -483,13 +515,13 @@ export function serializeNoteToMarkdown(
       '---',
       '',
     ];
-    return lines.join('\n') + (note.content || '');
+    return lines.join('\n') + cleanContent;
   }
 
   const title = typeof noteOrTitle === 'string' ? noteOrTitle : '';
   const tags = tagsArg || [];
   const pinned = Boolean(pinnedArg);
-  const content = contentArg || '';
+  const content = cleanMarkdownBreaks(contentArg || '');
 
   const frontmatterLines = [
     '---',
@@ -528,13 +560,9 @@ export function renderMarkdownToHtml(markdownContent: string, images?: NoteImage
   let cleanMarkdown = markdownContent;
   if (cleanMarkdown.trim().startsWith('<p>') && cleanMarkdown.includes('</p>')) {
     cleanMarkdown = convertHtmlToMarkdown(cleanMarkdown);
+  } else {
+    cleanMarkdown = cleanMarkdownBreaks(cleanMarkdown);
   }
-
-  // Preserve multiple blank lines in markdown by converting extra newlines to <br>
-  // A standard paragraph break is \n\n. Any additional newlines (\n\n\n+) represent explicit blank lines.
-  cleanMarkdown = cleanMarkdown.replace(/\n\n(\n+)/g, (_match, extraNewlines) => {
-    return '\n\n' + '<br>\n\n'.repeat(extraNewlines.length);
-  });
 
   // Normalize shorthand markdown task lists e.g. "[ ] Task" or "[x] Task" without leading bullet into "- [ ] Task" or "- [x] Task"
   cleanMarkdown = cleanMarkdown.replace(/^([ \t]*)\[([ x_])\]([ \t]+)/gim, '$1- [$2]$3');

@@ -1,5 +1,5 @@
 import React from 'react';
-import { convertHtmlToMarkdown } from '../lib/markdown';
+import { convertHtmlToMarkdown, cleanMarkdownBreaks } from '../lib/markdown';
 
 interface NotePreviewProps {
   content: string;
@@ -84,7 +84,9 @@ function parseInlineTokens(text: string): React.ReactNode[] {
 }
 
 function renderLine(line: string): React.ReactNode {
-  const text = line.trim();
+  let text = line.trim();
+  if (!text || /^<br\s*\/?>$/i.test(text)) return null;
+  text = text.replace(/<br\s*\/?>/gi, ' ').trim();
   if (!text) return null;
 
   // Checkboxes / Task list items (matches with or without bullet prefix, and any mark in brackets)
@@ -182,11 +184,14 @@ const NotePreviewComponent: React.FC<NotePreviewProps> = ({ content }) => {
     .replace(/!\[([^\]]*)\]\(([^)]*)\)/g, '')
     .replace(/<img[^>]*>/gi, '');
 
-  // Split lines
+  // Clean spurious br tags
+  markdown = cleanMarkdownBreaks(markdown);
+
+  // Split lines and filter empty / br-only lines
   const lines = markdown
     .split('\n')
     .map((l) => l.trim())
-    .filter(Boolean);
+    .filter((l) => Boolean(l) && !/^<br\s*\/?>$/i.test(l));
 
   if (lines.length === 0) {
     return <span className="italic text-current font-normal text-sm">Empty note...</span>;
