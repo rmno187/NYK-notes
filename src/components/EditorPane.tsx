@@ -38,6 +38,7 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
   onChangeProject,
   allProjects,
   onToggleFeatured,
+  onChangeDate,
   onChangeSlug,
   onChangeStatus,
   onChangeYear,
@@ -796,6 +797,7 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
         onChangeProject={onChangeProject}
         allProjects={allProjects}
         onToggleFeatured={onToggleFeatured}
+        onChangeDate={onChangeDate}
         onChangeSlug={onChangeSlug}
         onChangeStatus={onChangeStatus}
         onChangeYear={onChangeYear}

@@ -2,7 +2,7 @@ import JSZip from 'jszip';
 import { Note, NoteImage } from '../types';
 import { serializeNoteToMarkdown, parseMarkdownNote, cleanMarkdownBreaks } from './markdown';
 import { dataUrlToBlob } from './imageUtils';
-import { getNoteBaseName } from './noteUtils';
+import { getNoteBaseName, normalizeTags } from './noteUtils';
 
 /**
  * Generates a clean markdown filename from date stamp and title.
@@ -311,7 +311,7 @@ export async function openLocalMarkdownFile(): Promise<{ note: Note; fileName: s
         id: `local-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
         title: parsed.title,
         content: parsed.content,
-        tags: parsed.tags || [],
+        tags: normalizeTags(parsed.tags),
         pinned: Boolean(parsed.pinned),
         type: parsed.type || 'note',
         date: parsed.date,
@@ -354,7 +354,7 @@ export async function openLocalMarkdownFile(): Promise<{ note: Note; fileName: s
           id: `local-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
           title: parsed.title,
           content: parsed.content,
-          tags: parsed.tags || [],
+          tags: normalizeTags(parsed.tags),
           pinned: Boolean(parsed.pinned),
           type: parsed.type || 'note',
           date: parsed.date,

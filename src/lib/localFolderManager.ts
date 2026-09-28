@@ -1,6 +1,6 @@
 import { Note, NoteType, LocalFolderConfig } from '../types';
 import { serializeNoteToMarkdown, parseMarkdownNote } from './markdown';
-import { getNoteBaseName, slugify } from './noteUtils';
+import { getNoteBaseName, slugify, normalizeTags } from './noteUtils';
 import { readFileAsDataUrl } from './imageUtils';
 import { saveImagesToDirectoryHandle } from './localFileOperations';
 
@@ -582,7 +582,7 @@ class LocalFolderManager {
             id: parsed.id || `local-${fileName.replace(/\.md$/, '')}`,
             title: parsed.title,
             content: parsed.content,
-            tags: parsed.tags || [],
+            tags: normalizeTags(parsed.tags),
             pinned: Boolean(parsed.pinned),
             type: inferredType,
             date: parsed.date,

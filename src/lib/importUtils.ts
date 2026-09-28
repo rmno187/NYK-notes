@@ -2,7 +2,7 @@ import JSZip from 'jszip';
 import { Note, NoteImage } from '../types';
 import { parseMarkdownNote } from './markdown';
 import { readFileAsDataUrl } from './imageUtils';
-import { getNoteBaseName } from './noteUtils';
+import { getNoteBaseName, normalizeTags } from './noteUtils';
 
 const IMAGE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'avif', 'bmp']);
 
@@ -115,7 +115,7 @@ export async function parseZipArchiveToNotes(zipFile: File | Blob): Promise<Note
       id: `imported-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
       title: parsed.title,
       content: parsed.content,
-      tags: parsed.tags,
+      tags: normalizeTags(parsed.tags),
       pinned: parsed.pinned,
       type: parsed.type,
       date: parsed.date,
@@ -216,7 +216,7 @@ export async function importNotesFromFiles(files: FileList | File[]): Promise<No
       id: `imported-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
       title: parsed.title,
       content: parsed.content,
-      tags: parsed.tags,
+      tags: normalizeTags(parsed.tags),
       pinned: parsed.pinned,
       type: parsed.type,
       date: parsed.date,

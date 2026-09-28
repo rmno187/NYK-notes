@@ -168,6 +168,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const filteredNotes = useMemo(() => {
     const query = searchQuery.toLowerCase().trim();
     if (!query) return currentNotesList;
+    const cleanQuery = query.replace(/^#/, '').trim();
 
     return currentNotesList.filter((note) => {
       return (
@@ -181,7 +182,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         (note.year && note.year.toString().toLowerCase().includes(query)) ||
         (note.url && note.url.toLowerCase().includes(query)) ||
         (note.github && note.github.toLowerCase().includes(query)) ||
-        note.tags.some((t) => t.toLowerCase().includes(query))
+        normalizeTags(note.tags).some((t) => t.includes(cleanQuery) || t.includes(query))
       );
     });
   }, [currentNotesList, searchQuery]);

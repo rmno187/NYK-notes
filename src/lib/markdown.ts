@@ -476,6 +476,7 @@ export function serializeNoteToMarkdown(
       const lines = [
         '---',
         `title: "${(note.title || '').replace(/"/g, '\\"')}"`,
+        ...(note.date ? [`date: "${note.date.replace(/"/g, '\\"')}"`] : []),
         `slug: ${slugVal}`,
         `description: "${(note.description || '').replace(/"/g, '\\"')}"`,
         `status: ${statusVal}`,
@@ -512,6 +513,7 @@ export function serializeNoteToMarkdown(
     const lines = [
       '---',
       `title: "${(note.title || '').replace(/"/g, '\\"')}"`,
+      ...(note.date ? [`date: "${note.date.replace(/"/g, '\\"')}"`] : []),
       `tags: [${cleanTags.map((t) => `"${t}"`).join(', ')}]`,
       `pinned: ${Boolean(note.pinned)}`,
       '---',

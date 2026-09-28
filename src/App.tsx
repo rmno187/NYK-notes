@@ -703,6 +703,33 @@ export default function App() {
     );
   }, [activeNoteId, persistNote]);
 
+  // Update Note Date (Blog/Note/Project mode)
+  const handleDateChange = useCallback(
+    (newDate: string) => {
+      if (!activeNoteId) return;
+
+      const trimmedDate = newDate.trim();
+      const parsedTs = Date.parse(trimmedDate);
+
+      setNotes((prev) =>
+        prev.map((note) => {
+          if (note.id === activeNoteId) {
+            const updated: Note = {
+              ...note,
+              date: trimmedDate || undefined,
+              ...(!isNaN(parsedTs) ? { createdAt: parsedTs } : {}),
+              updatedAt: Date.now(),
+            };
+            persistNote(updated);
+            return updated;
+          }
+          return note;
+        })
+      );
+    },
+    [activeNoteId, persistNote]
+  );
+
   // Update Project Slug (Project mode)
   const handleSlugChange = useCallback(
     (newSlug: string) => {
@@ -1292,7 +1319,7 @@ export default function App() {
           if (note.id === activeNoteId) {
             const currentTags = normalizeTags(note.tags);
             if (currentTags.includes(cleanTag)) return note;
-            const updated = { ...note, tags: [...currentTags, cleanTag], updatedAt: Date.now() };
+            const updated = { ...note, tags: normalizeTags([...currentTags, cleanTag]), updatedAt: Date.now() };
             persistNote(updated);
             return updated;
           }
@@ -1665,6 +1692,7 @@ export default function App() {
               onChangeProject={handleProjectChange}
               allProjects={allProjects}
               onToggleFeatured={handleToggleFeatured}
+              onChangeDate={handleDateChange}
               onChangeSlug={handleSlugChange}
               onChangeStatus={handleStatusChange}
               onChangeYear={handleYearChange}

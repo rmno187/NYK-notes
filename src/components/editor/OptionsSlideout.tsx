@@ -1,5 +1,5 @@
 import React, { useRef, useState, useEffect } from 'react';
-import { X, Check, FolderOpen } from 'lucide-react';
+import { X, Check, FolderOpen, Calendar } from 'lucide-react';
 import { Note, EditorMode, StorageMode, Theme, NoteType } from '../../types';
 import { slugify, getNoteBaseName, normalizeTag, normalizeTags } from '../../lib/noteUtils';
 
@@ -10,6 +10,7 @@ interface OptionsSlideoutProps {
   allTags: string[];
   onAddTag: (tag: string) => void;
   onRemoveTag: (tag: string) => void;
+  onChangeDate?: (date: string) => void;
   onChangeDescription?: (description: string) => void;
   onChangeAuthor?: (author: string) => void;
   allAuthors?: string[];
@@ -52,6 +53,7 @@ export const OptionsSlideout: React.FC<OptionsSlideoutProps> = ({
   allTags,
   onAddTag,
   onRemoveTag,
+  onChangeDate,
   onChangeDescription,
   onChangeAuthor,
   allAuthors = [],
@@ -139,6 +141,12 @@ export const OptionsSlideout: React.FC<OptionsSlideoutProps> = ({
   const [orderInput, setOrderInput] = useState('');
   const orderInputRef = useRef<HTMLInputElement>(null);
 
+  // Date State
+  const [isEditingDate, setIsEditingDate] = useState(false);
+  const [dateInput, setDateInput] = useState('');
+  const dateInputRef = useRef<HTMLInputElement>(null);
+  const datePickerRef = useRef<HTMLInputElement>(null);
+
   // Reset states on note change
   useEffect(() => {
     setIsAddingTag(false);
@@ -176,7 +184,14 @@ export const OptionsSlideout: React.FC<OptionsSlideoutProps> = ({
 
     setIsEditingFileName(false);
     setFileNameInput('');
+
+    setIsEditingDate(false);
+    setDateInput('');
   }, [note.id]);
+
+  useEffect(() => {
+    if (isEditingDate && dateInputRef.current) dateInputRef.current.focus();
+  }, [isEditingDate]);
 
   useEffect(() => {
     if (isEditingFileName && fileNameInputRef.current) fileNameInputRef.current.focus();
@@ -258,9 +273,11 @@ export const OptionsSlideout: React.FC<OptionsSlideoutProps> = ({
   });
 
   const handleAddTag = (tagToAdd: string) => {
-    const clean = normalizeTag(tagToAdd);
-    if (clean && !normalizedNoteTags.includes(clean)) {
-      onAddTag(clean);
+    const splitTags = tagToAdd.split(',').map((t) => normalizeTag(t)).filter(Boolean);
+    for (const clean of splitTags) {
+      if (clean && !normalizedNoteTags.includes(clean)) {
+        onAddTag(clean);
+      }
     }
     setTagInput('');
     setIsAddingTag(false);
@@ -360,6 +377,43 @@ export const OptionsSlideout: React.FC<OptionsSlideoutProps> = ({
     setFileNameInput('');
   };
 
+  const handleSaveDate = () => {
+    let clean = dateInput.trim();
+    if (clean) {
+      const ymdMatch = clean.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+      if (ymdMatch) {
+        const d = new Date(Number(ymdMatch[1]), Number(ymdMatch[2]) - 1, Number(ymdMatch[3]));
+        if (!isNaN(d.getTime())) {
+          clean = d.toLocaleDateString('en-US', {
+            month: 'long',
+            day: 'numeric',
+            year: 'numeric',
+          });
+        }
+      }
+      onChangeDate?.(clean);
+    }
+    setIsEditingDate(false);
+  };
+
+  const handleDatePickerSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value;
+    if (val) {
+      const [y, m, d] = val.split('-').map(Number);
+      const dateObj = new Date(y, m - 1, d);
+      if (!isNaN(dateObj.getTime())) {
+        const formatted = dateObj.toLocaleDateString('en-US', {
+          month: 'long',
+          day: 'numeric',
+          year: 'numeric',
+        });
+        setDateInput(formatted);
+        onChangeDate?.(formatted);
+        setIsEditingDate(false);
+      }
+    }
+  };
+
   const currentBaseName = getNoteBaseName(note);
   const currentFileName = note.fileName || `${currentBaseName}.md`;
 
@@ -417,15 +471,15 @@ export const OptionsSlideout: React.FC<OptionsSlideoutProps> = ({
                       placeholder="Tag name..."
                       value={tagInput}
                       onChange={(e) => {
-                        setTagInput(e.target.value);
+                        setTagInput(e.target.value.toLowerCase());
                         setIsTagDropdownOpen(true);
                       }}
                       onFocus={() => setIsTagDropdownOpen(true)}
                       onKeyDown={(e) => {
                         if (e.key === 'Enter') {
                           e.preventDefault();
-                          if (cleanTypedTag) {
-                            handleAddTag(cleanTypedTag);
+                          if (tagInput.trim()) {
+                            handleAddTag(tagInput);
                           }
                         } else if (e.key === 'Escape') {
                           setIsAddingTag(false);
@@ -1362,19 +1416,97 @@ export const OptionsSlideout: React.FC<OptionsSlideoutProps> = ({
                 )}
               </div>
 
-              {note.type === 'post' && (
-                <div className="flex justify-between gap-4">
-                  <span className="text-neutral-500 dark:text-neutral-500">Date</span>
-                  <span className="text-black dark:text-white text-right">
-                    {note.date ||
-                      new Date(note.createdAt).toLocaleDateString('en-US', {
-                        month: 'long',
-                        day: 'numeric',
-                        year: 'numeric',
-                      })}
-                  </span>
-                </div>
-              )}
+              <div className="flex items-center justify-between gap-2 min-h-[28px]">
+                <span className="text-neutral-500 dark:text-neutral-500 shrink-0">Date</span>
+                {!isEditingDate ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const currentVal =
+                        note.date ||
+                        new Date(note.createdAt).toLocaleDateString('en-US', {
+                          month: 'long',
+                          day: 'numeric',
+                          year: 'numeric',
+                        });
+                      setDateInput(currentVal);
+                      setIsEditingDate(true);
+                    }}
+                    className="group flex items-center gap-1.5 text-black dark:text-white text-right hover:underline underline-offset-2 transition-colors cursor-pointer text-xs"
+                    title="Click to change date"
+                  >
+                    <span>
+                      {note.date ||
+                        new Date(note.createdAt).toLocaleDateString('en-US', {
+                          month: 'long',
+                          day: 'numeric',
+                          year: 'numeric',
+                        })}
+                    </span>
+                    <Calendar className="w-3 h-3 text-neutral-400 group-hover:text-black dark:group-hover:text-white transition-colors" />
+                  </button>
+                ) : (
+                  <div className="relative flex items-center gap-1">
+                    <input
+                      ref={dateInputRef}
+                      type="text"
+                      placeholder="e.g. August 25, 2026"
+                      value={dateInput}
+                      onChange={(e) => setDateInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          handleSaveDate();
+                        } else if (e.key === 'Escape') {
+                          setIsEditingDate(false);
+                          setDateInput('');
+                        }
+                      }}
+                      className="bg-transparent border-b border-black dark:border-white py-0.5 px-1 text-xs text-black dark:text-white placeholder-neutral-400 dark:placeholder-neutral-600 focus:outline-none w-36 sm:w-44 text-right transition-colors"
+                    />
+                    <input
+                      ref={datePickerRef}
+                      type="date"
+                      className="sr-only"
+                      tabIndex={-1}
+                      onChange={handleDatePickerSelect}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        try {
+                          datePickerRef.current?.showPicker?.();
+                        } catch {
+                          datePickerRef.current?.focus();
+                        }
+                      }}
+                      className="text-neutral-400 hover:text-black dark:hover:text-white p-0.5"
+                      title="Open calendar picker"
+                    >
+                      <Calendar className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleSaveDate}
+                      className="text-neutral-600 hover:text-black dark:text-neutral-300 dark:hover:text-white p-0.5"
+                      title="Save date"
+                    >
+                      <Check className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsEditingDate(false);
+                        setDateInput('');
+                      }}
+                      className="text-neutral-400 hover:text-black dark:hover:text-white p-0.5"
+                      title="Cancel"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                )}
+              </div>
 
               <div className="flex justify-between gap-4">
                 <span className="text-neutral-500 dark:text-neutral-500">Created</span>

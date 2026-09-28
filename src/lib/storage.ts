@@ -1,6 +1,6 @@
 import { Note, NoteImage, StorageMode } from '../types';
 import { parseMarkdownNote, serializeNoteToMarkdown } from './markdown';
-import { getNoteBaseName } from './noteUtils';
+import { getNoteBaseName, normalizeTags } from './noteUtils';
 import { readFileAsDataUrl } from './imageUtils';
 import { saveImagesToDirectoryHandle } from './localFileOperations';
 
@@ -241,7 +241,7 @@ export async function loadNotesFromDirectory(dirHandle: FileSystemDirectoryHandl
         id: fileName,
         title: parsed.title,
         content: parsed.content,
-        tags: parsed.tags,
+        tags: normalizeTags(parsed.tags),
         pinned: parsed.pinned,
         createdAt: file.lastModified,
         updatedAt: file.lastModified,
