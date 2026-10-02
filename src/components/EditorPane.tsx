@@ -647,7 +647,6 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
                 className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-black text-white dark:bg-white dark:text-black hover:opacity-90 transition-opacity text-xs font-semibold tracking-wide shadow-xs"
                 title="Publish post to blog (Git / GitHub)"
               >
-                <GitBranch className="w-3.5 h-3.5" />
                 <span>Publish</span>
               </button>
             )}

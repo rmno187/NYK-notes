@@ -1618,14 +1618,11 @@ export const OptionsSlideout: React.FC<OptionsSlideoutProps> = ({
                   }}
                   className="group flex items-center justify-between py-2.5 text-left border-b border-neutral-100 dark:border-neutral-900"
                 >
-                  <span className="text-sm font-semibold text-black dark:text-white group-hover:underline underline-offset-4 flex items-center gap-1.5">
+                  <span className="text-sm text-black dark:text-white group-hover:underline underline-offset-4 flex items-center gap-1.5">
                     Publish to Blog
-                    <span className="text-[10px] font-mono px-1 py-0.2 rounded bg-black text-white dark:bg-white dark:text-black">
-                      Git
-                    </span>
                   </span>
                   <span className="text-xs text-neutral-400 dark:text-neutral-600">
-                    GitHub / Local
+                    GitHub
                   </span>
                 </button>
               )}

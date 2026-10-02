@@ -161,6 +161,7 @@ export default function App() {
 
   // Initialize and subscribe to Local Folder Sync configuration
   useEffect(() => {
+    window.scrollTo(0, 0);
     localFolderManager.initialize().then(() => {
       setIsLocalFolderConfigured(localFolderManager.hasAnyFolderConfigured());
     });
@@ -1641,7 +1642,7 @@ export default function App() {
   });
 
   return (
-    <div className="flex flex-col h-[100dvh] w-full overflow-hidden bg-white dark:bg-black text-black dark:text-white font-sans antialiased transition-colors duration-200">
+    <div className="flex flex-col h-[100dvh] w-full overflow-hidden bg-white dark:bg-black text-black dark:text-white font-sans antialiased transition-colors duration-200 pt-[env(safe-area-inset-top,0px)] pb-[env(safe-area-inset-bottom,0px)] pl-[env(safe-area-inset-left,0px)] pr-[env(safe-area-inset-right,0px)]">
       {/* Main Workspace */}
       <div className="flex-1 flex overflow-hidden relative">
         {/* Sidebar */}

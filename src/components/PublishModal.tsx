@@ -1,33 +1,27 @@
 import React, { useState, useEffect } from 'react';
 import {
   X,
-  GitBranch,
   Upload,
   Check,
-  Copy,
-  Terminal,
   ExternalLink,
   AlertCircle,
   CheckCircle2,
   RefreshCw,
-  FolderGit2,
   KeyRound,
   Eye,
   EyeOff,
   Sparkles,
+  FileText,
 } from 'lucide-react';
-import { Note, GitPublishConfig, GitPublishMode } from '../types';
+import { Note, GitPublishConfig } from '../types';
 import {
   getStoredGitPublishConfig,
   saveStoredGitPublishConfig,
   publishToGitHub,
-  publishViaLocalServer,
-  generateTerminalCommands,
   formatCommitMessage,
   getRepoFilePath,
   PublishResult,
 } from '../lib/gitPublisher';
-import { localFolderManager } from '../lib/localFolderManager';
 
 interface PublishModalProps {
   isOpen: boolean;
@@ -36,6 +30,22 @@ interface PublishModalProps {
   onPublishSuccess?: (result: PublishResult) => void;
 }
 
+const GitHubIcon = ({ className = '' }: { className?: string }) => (
+  <svg
+    viewBox="0 0 24 24"
+    xmlns="http://www.w3.org/2000/svg"
+    className={`text-black dark:text-white ${className}`}
+    fill="currentColor"
+    aria-hidden="true"
+  >
+    <path
+      fillRule="evenodd"
+      clipRule="evenodd"
+      d="M12 0.5C5.65 0.5.5 5.65.5 12c0 5.08 3.29 9.39 7.86 10.91.58.11.79-.25.79-.56v-2.17c-3.2.7-3.88-1.35-3.88-1.35-.53-1.33-1.28-1.68-1.28-1.68-1.04-.71.08-.7.08-.7 1.15.08 1.75 1.18 1.75 1.18 1.03 1.76 2.7 1.25 3.36.96.1-.75.4-1.25.73-1.54-2.55-.29-5.23-1.28-5.23-5.69 0-1.26.45-2.29 1.18-3.1-.12-.29-.51-1.47.11-3.06 0 0 .96-.31 3.15 1.18a10.9 10.9 0 0 1 5.74 0c2.19-1.49 3.15-1.18 3.15-1.18.62 1.59.23 2.77.11 3.06.73.81 1.18 1.84 1.18 3.1 0 4.42-2.69 5.4-5.25 5.68.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.51 11.51 0 0 0 23.5 12C23.5 5.65 18.35.5 12 .5Z"
+    />
+  </svg>
+);
+
 export const PublishModal: React.FC<PublishModalProps> = ({
   isOpen,
   onClose,
@@ -43,12 +53,10 @@ export const PublishModal: React.FC<PublishModalProps> = ({
   onPublishSuccess,
 }) => {
   const [config, setConfig] = useState<GitPublishConfig>(getStoredGitPublishConfig());
-  const [activeTab, setActiveTab] = useState<GitPublishMode>('github');
   const [commitMessage, setCommitMessage] = useState('');
   const [isPublishing, setIsPublishing] = useState(false);
   const [publishResult, setPublishResult] = useState<PublishResult | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [copiedCommand, setCopiedCommand] = useState(false);
   const [showToken, setShowToken] = useState(false);
 
   // Initialize state when modal opens
@@ -56,26 +64,15 @@ export const PublishModal: React.FC<PublishModalProps> = ({
     if (isOpen) {
       const stored = getStoredGitPublishConfig();
       setConfig(stored);
-      setActiveTab(stored.mode || 'github');
       setCommitMessage(formatCommitMessage(stored.commitMessageTemplate, note));
       setPublishResult(null);
       setErrorMessage(null);
-      setCopiedCommand(false);
-
-      // Auto-detect local repo path if empty and localFolderManager has root
-      if (!stored.localRepoPath) {
-        const lfConfig = localFolderManager.getConfig();
-        if (lfConfig.rootName) {
-          setConfig((prev) => ({ ...prev, localRepoPath: lfConfig.rootName || '' }));
-        }
-      }
     }
   }, [isOpen, note]);
 
   if (!isOpen) return null;
 
   const { fileName, fullPath } = getRepoFilePath(note, config.githubFolderPath);
-  const { commandString, steps } = generateTerminalCommands(note, config);
   const wordCount = (note.content || '').trim().split(/\s+/).filter(Boolean).length;
 
   const handleUpdateConfig = (updates: Partial<GitPublishConfig>) => {
@@ -92,7 +89,6 @@ export const PublishModal: React.FC<PublishModalProps> = ({
       const res = await publishToGitHub(note, config, commitMessage);
       setPublishResult(res);
       handleUpdateConfig({
-        mode: 'github',
         lastPublishedAt: Date.now(),
         lastCommitSha: res.commitSha,
         lastCommitUrl: res.commitUrl,
@@ -105,62 +101,26 @@ export const PublishModal: React.FC<PublishModalProps> = ({
     }
   };
 
-  const handlePublishLocal = async () => {
-    setIsPublishing(true);
-    setErrorMessage(null);
-    setPublishResult(null);
-
-    try {
-      const res = await publishViaLocalServer(note, config, commitMessage);
-      setPublishResult(res);
-      handleUpdateConfig({
-        mode: 'local',
-        lastPublishedAt: Date.now(),
-        lastCommitSha: res.commitSha,
-      });
-      onPublishSuccess?.(res);
-    } catch (err: any) {
-      setErrorMessage(
-        err.message ||
-          'Failed to run git publish on local server. Ensure your dev server is running and the repo path is valid.'
-      );
-    } finally {
-      setIsPublishing(false);
-    }
-  };
-
-  const handleCopyCommand = () => {
-    if (typeof navigator !== 'undefined' && navigator.clipboard) {
-      navigator.clipboard.writeText(commandString);
-      setCopiedCommand(true);
-      setTimeout(() => setCopiedCommand(false), 2500);
-    }
-  };
-
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4"
       onClick={onClose}
     >
       <div
-        className="w-full max-w-xl bg-white dark:bg-black border border-neutral-200 dark:border-neutral-800 shadow-2xl rounded-xl overflow-hidden flex flex-col max-h-[90vh]"
+        className="w-full max-w-lg bg-white dark:bg-black border border-neutral-200 dark:border-neutral-800 shadow-2xl rounded-xl overflow-hidden flex flex-col max-h-[92vh]"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
         <div className="px-5 py-4 border-b border-neutral-200 dark:border-neutral-800 flex items-center justify-between shrink-0 bg-neutral-50/50 dark:bg-neutral-900/30">
           <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-lg bg-black text-white dark:bg-white dark:text-black flex items-center justify-center shrink-0">
-              <GitBranch className="w-4 h-4" />
-            </div>
+            <GitHubIcon className="w-6 h-6 shrink-0" />
+
             <div>
               <h2 className="text-sm font-semibold tracking-wide text-neutral-900 dark:text-neutral-100 flex items-center gap-1.5">
                 Publish Blog Post
-                <span className="text-[10px] font-mono uppercase px-1.5 py-0.5 rounded bg-neutral-200 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300">
-                  Git
-                </span>
               </h2>
               <p className="text-xs text-neutral-500 dark:text-neutral-400">
-                Push your post live to GitHub or trigger your blog's automated build.
+                Push directly to your blog's GitHub repository.
               </p>
             </div>
           </div>
@@ -182,7 +142,7 @@ export const PublishModal: React.FC<PublishModalProps> = ({
               {note.title || 'Untitled Post'}
             </span>
             <span className="text-neutral-500 font-mono text-[11px] truncate block">
-              File: {fileName}
+              Path: {fullPath}
             </span>
           </div>
           <div className="text-right shrink-0 text-neutral-500 text-[11px]">
@@ -192,58 +152,7 @@ export const PublishModal: React.FC<PublishModalProps> = ({
           </div>
         </div>
 
-        {/* Navigation Tabs */}
-        <div className="flex border-b border-neutral-200 dark:border-neutral-800 bg-neutral-100/50 dark:bg-neutral-950 px-5 pt-2 gap-2 text-xs">
-          <button
-            type="button"
-            onClick={() => {
-              setActiveTab('github');
-              handleUpdateConfig({ mode: 'github' });
-            }}
-            className={`pb-2.5 px-3 font-medium flex items-center gap-1.5 border-b-2 transition-colors ${
-              activeTab === 'github'
-                ? 'border-black dark:border-white text-neutral-900 dark:text-neutral-100 font-semibold'
-                : 'border-transparent text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-200'
-            }`}
-          >
-            <Upload className="w-3.5 h-3.5" />
-            GitHub (1-Click Push)
-          </button>
-
-          <button
-            type="button"
-            onClick={() => {
-              setActiveTab('local');
-              handleUpdateConfig({ mode: 'local' });
-            }}
-            className={`pb-2.5 px-3 font-medium flex items-center gap-1.5 border-b-2 transition-colors ${
-              activeTab === 'local'
-                ? 'border-black dark:border-white text-neutral-900 dark:text-neutral-100 font-semibold'
-                : 'border-transparent text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-200'
-            }`}
-          >
-            <FolderGit2 className="w-3.5 h-3.5" />
-            Local Machine Git
-          </button>
-
-          <button
-            type="button"
-            onClick={() => {
-              setActiveTab('copy');
-              handleUpdateConfig({ mode: 'copy' });
-            }}
-            className={`pb-2.5 px-3 font-medium flex items-center gap-1.5 border-b-2 transition-colors ${
-              activeTab === 'copy'
-                ? 'border-black dark:border-white text-neutral-900 dark:text-neutral-100 font-semibold'
-                : 'border-transparent text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-200'
-            }`}
-          >
-            <Terminal className="w-3.5 h-3.5" />
-            Terminal Commands
-          </button>
-        </div>
-
-        {/* Scrollable Content */}
+        {/* Form Body */}
         <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
           {/* Error Message Banner */}
           {errorMessage && (
@@ -264,21 +173,24 @@ export const PublishModal: React.FC<PublishModalProps> = ({
                 <p className="font-semibold text-sm">Post published successfully!</p>
                 {publishResult.commitSha && (
                   <p className="font-mono text-[11px]">
-                    Commit: <span className="bg-emerald-100 dark:bg-emerald-900/60 px-1 py-0.5 rounded">{publishResult.commitSha.slice(0, 7)}</span>
+                    Commit:{' '}
+                    <span className="bg-emerald-100 dark:bg-emerald-900/60 px-1 py-0.5 rounded">
+                      {publishResult.commitSha.slice(0, 7)}
+                    </span>
                   </p>
                 )}
-                {publishResult.commitUrl && (
-                  <a
-                    href={publishResult.commitUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1 text-emerald-700 dark:text-emerald-300 underline font-medium hover:opacity-80 pt-0.5"
-                  >
-                    View commit on GitHub <ExternalLink className="w-3 h-3" />
-                  </a>
-                )}
-                {publishResult.fileUrl && (
-                  <div>
+                <div className="flex flex-wrap gap-3 pt-0.5">
+                  {publishResult.commitUrl && (
+                    <a
+                      href={publishResult.commitUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 text-emerald-700 dark:text-emerald-300 underline font-medium hover:opacity-80"
+                    >
+                      View commit on GitHub <ExternalLink className="w-3 h-3" />
+                    </a>
+                  )}
+                  {publishResult.fileUrl && (
                     <a
                       href={publishResult.fileUrl}
                       target="_blank"
@@ -287,269 +199,158 @@ export const PublishModal: React.FC<PublishModalProps> = ({
                     >
                       View file on GitHub <ExternalLink className="w-3 h-3" />
                     </a>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* TAB 1: GITHUB DIRECT PUBLISH */}
-          {activeTab === 'github' && (
-            <div className="space-y-3.5">
-              <div className="text-xs text-neutral-600 dark:text-neutral-400 bg-neutral-50 dark:bg-neutral-900/40 p-3 rounded-lg border border-neutral-100 dark:border-neutral-800 flex items-start gap-2">
-                <Sparkles className="w-4 h-4 shrink-0 text-amber-500 mt-0.5" />
-                <p>
-                  Publishes directly to your GitHub repository using the GitHub REST API. Your blog host (Vercel, Netlify, GitHub Pages, etc.) will automatically detect the commit and trigger a build!
-                </p>
-              </div>
-
-              {/* GitHub Repo */}
-              <div className="space-y-1">
-                <label className="text-xs font-medium text-neutral-900 dark:text-neutral-100 flex items-center justify-between">
-                  <span>GitHub Repository</span>
-                  <span className="text-[10px] text-neutral-500 font-normal">owner/repo</span>
-                </label>
-                <input
-                  type="text"
-                  placeholder="e.g. username/my-blog"
-                  value={config.githubRepo}
-                  onChange={(e) => handleUpdateConfig({ githubRepo: e.target.value })}
-                  className="w-full text-xs font-mono px-3 py-2 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg text-neutral-900 dark:text-neutral-100 focus:outline-none focus:border-black dark:focus:border-white"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                {/* Branch */}
-                <div className="space-y-1">
-                  <label className="text-xs font-medium text-neutral-900 dark:text-neutral-100">
-                    Branch
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="main"
-                    value={config.githubBranch}
-                    onChange={(e) => handleUpdateConfig({ githubBranch: e.target.value })}
-                    className="w-full text-xs font-mono px-3 py-2 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg text-neutral-900 dark:text-neutral-100 focus:outline-none focus:border-black dark:focus:border-white"
-                  />
-                </div>
-
-                {/* Path in repo */}
-                <div className="space-y-1">
-                  <label className="text-xs font-medium text-neutral-900 dark:text-neutral-100">
-                    Directory in Repo
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="content/posts"
-                    value={config.githubFolderPath}
-                    onChange={(e) => handleUpdateConfig({ githubFolderPath: e.target.value })}
-                    className="w-full text-xs font-mono px-3 py-2 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg text-neutral-900 dark:text-neutral-100 focus:outline-none focus:border-black dark:focus:border-white"
-                  />
-                </div>
-              </div>
-
-              {/* GitHub Token */}
-              <div className="space-y-1">
-                <div className="flex items-center justify-between">
-                  <label className="text-xs font-medium text-neutral-900 dark:text-neutral-100 flex items-center gap-1.5">
-                    <KeyRound className="w-3.5 h-3.5 text-neutral-500" />
-                    <span>Personal Access Token</span>
-                  </label>
-                  <a
-                    href="https://github.com/settings/tokens/new?scopes=repo&description=OfflineNotes+Blog+Publisher"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-[11px] text-neutral-500 hover:text-black dark:hover:text-white underline inline-flex items-center gap-0.5"
-                  >
-                    Generate token <ExternalLink className="w-2.5 h-2.5" />
-                  </a>
-                </div>
-                <div className="relative">
-                  <input
-                    type={showToken ? 'text' : 'password'}
-                    placeholder="ghp_xxxxxxxxxxxx or github_pat_xxxxxxxxxxxx"
-                    value={config.githubToken}
-                    onChange={(e) => handleUpdateConfig({ githubToken: e.target.value })}
-                    className="w-full text-xs font-mono pr-9 pl-3 py-2 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg text-neutral-900 dark:text-neutral-100 focus:outline-none focus:border-black dark:focus:border-white"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowToken(!showToken)}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200"
-                    title={showToken ? 'Hide token' : 'Show token'}
-                  >
-                    {showToken ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-                  </button>
-                </div>
-                <p className="text-[11px] text-neutral-500 dark:text-neutral-400">
-                  Stored securely in your browser's local storage. Needs <code className="font-mono bg-neutral-100 dark:bg-neutral-800 px-1 py-0.5 rounded">repo</code> or <code className="font-mono bg-neutral-100 dark:bg-neutral-800 px-1 py-0.5 rounded">contents:write</code> scope.
-                </p>
-              </div>
-
-              {/* Commit Message */}
-              <div className="space-y-1">
-                <label className="text-xs font-medium text-neutral-900 dark:text-neutral-100">
-                  Commit Message
-                </label>
-                <input
-                  type="text"
-                  value={commitMessage}
-                  onChange={(e) => setCommitMessage(e.target.value)}
-                  className="w-full text-xs font-mono px-3 py-2 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg text-neutral-900 dark:text-neutral-100 focus:outline-none focus:border-black dark:focus:border-white"
-                />
-              </div>
-
-              {/* Action Button */}
-              <button
-                type="button"
-                onClick={handlePublishGitHub}
-                disabled={isPublishing || !config.githubRepo || !config.githubToken}
-                className="w-full py-2.5 px-4 bg-black text-white dark:bg-white dark:text-black font-semibold text-xs rounded-lg hover:opacity-90 transition-opacity flex items-center justify-center gap-2 disabled:opacity-40"
-              >
-                {isPublishing ? (
-                  <>
-                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                    <span>Committing & Pushing to GitHub...</span>
-                  </>
-                ) : (
-                  <>
-                    <Upload className="w-3.5 h-3.5" />
-                    <span>Publish Post to GitHub</span>
-                  </>
-                )}
-              </button>
-            </div>
-          )}
-
-          {/* TAB 2: LOCAL SERVER GIT */}
-          {activeTab === 'local' && (
-            <div className="space-y-3.5">
-              <div className="text-xs text-neutral-600 dark:text-neutral-400 bg-neutral-50 dark:bg-neutral-900/40 p-3 rounded-lg border border-neutral-100 dark:border-neutral-800">
-                <p>
-                  When running this app locally on your machine (<code className="font-mono">npm run dev</code>), the backend server can run <code className="font-mono">git add</code>, <code className="font-mono">git commit</code>, and <code className="font-mono">git push</code> directly in your local blog repository folder!
-                </p>
-              </div>
-
-              <div className="space-y-1">
-                <label className="text-xs font-medium text-neutral-900 dark:text-neutral-100 flex items-center justify-between">
-                  <span>Local Blog Repository Path</span>
-                  <span className="text-[10px] text-neutral-500 font-normal">Absolute or relative to dev server</span>
-                </label>
-                <input
-                  type="text"
-                  placeholder="e.g. /Users/myname/Sites/my-blog or ../my-blog"
-                  value={config.localRepoPath}
-                  onChange={(e) => handleUpdateConfig({ localRepoPath: e.target.value })}
-                  className="w-full text-xs font-mono px-3 py-2 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg text-neutral-900 dark:text-neutral-100 focus:outline-none focus:border-black dark:focus:border-white"
-                />
-              </div>
-
-              <div className="space-y-1">
-                <label className="text-xs font-medium text-neutral-900 dark:text-neutral-100">
-                  Branch
-                </label>
-                <input
-                  type="text"
-                  placeholder="main"
-                  value={config.localBranch}
-                  onChange={(e) => handleUpdateConfig({ localBranch: e.target.value })}
-                  className="w-full text-xs font-mono px-3 py-2 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg text-neutral-900 dark:text-neutral-100 focus:outline-none focus:border-black dark:focus:border-white"
-                />
-              </div>
-
-              <div className="space-y-1">
-                <label className="text-xs font-medium text-neutral-900 dark:text-neutral-100">
-                  Commit Message
-                </label>
-                <input
-                  type="text"
-                  value={commitMessage}
-                  onChange={(e) => setCommitMessage(e.target.value)}
-                  className="w-full text-xs font-mono px-3 py-2 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg text-neutral-900 dark:text-neutral-100 focus:outline-none focus:border-black dark:focus:border-white"
-                />
-              </div>
-
-              {/* Logs */}
-              {publishResult?.logs && publishResult.logs.length > 0 && (
-                <div className="p-3 bg-neutral-900 text-neutral-200 rounded-lg font-mono text-[11px] space-y-1 max-h-36 overflow-y-auto">
-                  {publishResult.logs.map((log, i) => (
-                    <div key={i} className="leading-tight">
-                      {log}
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              <button
-                type="button"
-                onClick={handlePublishLocal}
-                disabled={isPublishing}
-                className="w-full py-2.5 px-4 bg-black text-white dark:bg-white dark:text-black font-semibold text-xs rounded-lg hover:opacity-90 transition-opacity flex items-center justify-center gap-2 disabled:opacity-40"
-              >
-                {isPublishing ? (
-                  <>
-                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                    <span>Executing Git Commands...</span>
-                  </>
-                ) : (
-                  <>
-                    <FolderGit2 className="w-3.5 h-3.5" />
-                    <span>Run Git Publish on Local Machine</span>
-                  </>
-                )}
-              </button>
-            </div>
-          )}
-
-          {/* TAB 3: TERMINAL COMMANDS (ZERO SETUP COPY) */}
-          {activeTab === 'copy' && (
-            <div className="space-y-3.5">
-              <div className="text-xs text-neutral-600 dark:text-neutral-400 bg-neutral-50 dark:bg-neutral-900/40 p-3 rounded-lg border border-neutral-100 dark:border-neutral-800">
-                <p>
-                  Prefer your terminal? Click to copy the exact one-liner command ready to paste into your terminal:
-                </p>
-              </div>
-
-              <div className="relative group">
-                <div className="p-3.5 bg-neutral-950 text-neutral-100 font-mono text-xs rounded-lg overflow-x-auto border border-neutral-800 flex items-center justify-between">
-                  <code className="text-[12px]">{commandString}</code>
-                </div>
-                <button
-                  type="button"
-                  onClick={handleCopyCommand}
-                  className="mt-2 w-full flex items-center justify-center gap-1.5 py-2 px-3 bg-neutral-900 hover:bg-neutral-800 text-white rounded-lg text-xs font-semibold transition-colors"
-                >
-                  {copiedCommand ? (
-                    <>
-                      <Check className="w-3.5 h-3.5 text-emerald-400" />
-                      <span>Copied to Clipboard!</span>
-                    </>
-                  ) : (
-                    <>
-                      <Copy className="w-3.5 h-3.5" />
-                      <span>Copy Command to Clipboard</span>
-                    </>
                   )}
-                </button>
-              </div>
-
-              <div className="border-t border-neutral-200 dark:border-neutral-800 pt-3">
-                <h4 className="text-xs font-semibold text-neutral-800 dark:text-neutral-200 mb-2">
-                  Workflow Breakdown:
-                </h4>
-                <div className="space-y-1.5 font-mono text-[11px] text-neutral-600 dark:text-neutral-400">
-                  {steps.map((st, i) => (
-                    <div key={i} className="flex items-center gap-2">
-                      <span className="w-4 h-4 rounded bg-neutral-100 dark:bg-neutral-900 text-neutral-500 flex items-center justify-center text-[10px]">
-                        {i + 1}
-                      </span>
-                      <span>{st}</span>
-                    </div>
-                  ))}
                 </div>
               </div>
             </div>
           )}
+
+          {/* GitHub Repo */}
+          <div className="space-y-1">
+            <label className="text-xs font-medium text-neutral-900 dark:text-neutral-100 flex items-center justify-between">
+              <span>GitHub Repository</span>
+              <span className="text-[10px] text-neutral-500 font-normal">owner/repo</span>
+            </label>
+            <input
+              type="text"
+              placeholder="e.g. username/my-blog"
+              value={config.githubRepo}
+              onChange={(e) => handleUpdateConfig({ githubRepo: e.target.value })}
+              className="w-full text-xs font-mono px-3 py-2 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg text-neutral-900 dark:text-neutral-100 focus:outline-none focus:border-black dark:focus:border-white"
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            {/* Branch */}
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-neutral-900 dark:text-neutral-100">
+                Branch
+              </label>
+              <input
+                type="text"
+                placeholder="main"
+                value={config.githubBranch}
+                onChange={(e) => handleUpdateConfig({ githubBranch: e.target.value })}
+                className="w-full text-xs font-mono px-3 py-2 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg text-neutral-900 dark:text-neutral-100 focus:outline-none focus:border-black dark:focus:border-white"
+              />
+            </div>
+
+            {/* Path in repo */}
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-neutral-900 dark:text-neutral-100">
+                Directory in Repo
+              </label>
+              <input
+                type="text"
+                placeholder="content/posts"
+                value={config.githubFolderPath}
+                onChange={(e) => handleUpdateConfig({ githubFolderPath: e.target.value })}
+                className="w-full text-xs font-mono px-3 py-2 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg text-neutral-900 dark:text-neutral-100 focus:outline-none focus:border-black dark:focus:border-white"
+              />
+            </div>
+          </div>
+
+          {/* GitHub Token */}
+          <div className="space-y-1">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-medium text-neutral-900 dark:text-neutral-100 flex items-center gap-1.5">
+                <KeyRound className="w-3.5 h-3.5 text-neutral-500" />
+                <span>Personal Access Token</span>
+              </label>
+            </div>
+            <div className="relative">
+              <input
+                type={showToken ? 'text' : 'password'}
+                placeholder="ghp_xxxxxxxxxxxx or github_pat_xxxxxxxxxxxx"
+                value={config.githubToken}
+                onChange={(e) => handleUpdateConfig({ githubToken: e.target.value })}
+                className="w-full text-xs font-mono pr-9 pl-3 py-2 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg text-neutral-900 dark:text-neutral-100 focus:outline-none focus:border-black dark:focus:border-white"
+              />
+              <button
+                type="button"
+                onClick={() => setShowToken(!showToken)}
+                className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200"
+                title={showToken ? 'Hide token' : 'Show token'}
+              >
+                {showToken ? (
+                  <EyeOff className="w-3.5 h-3.5" />
+                ) : (
+                  <Eye className="w-3.5 h-3.5" />
+                )}
+              </button>
+            </div>
+            <p className="text-[11px] text-neutral-500 dark:text-neutral-400">
+              Stored securely in your browser's local storage. Needs{' '}
+              <code className="font-mono bg-neutral-100 dark:bg-neutral-800 px-1 py-0.5 rounded">
+                repo
+              </code>{' '}
+              or{' '}
+              <code className="font-mono bg-neutral-100 dark:bg-neutral-800 px-1 py-0.5 rounded">
+                contents:write
+              </code>{' '}
+              scope.
+            </p>
+          </div>
+
+          {/* Commit Message */}
+          <div className="space-y-1">
+            <label className="text-xs font-medium text-neutral-900 dark:text-neutral-100">
+              Commit Message
+            </label>
+            <input
+              type="text"
+              value={commitMessage}
+              onChange={(e) => setCommitMessage(e.target.value)}
+              className="w-full text-xs font-mono px-3 py-2 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg text-neutral-900 dark:text-neutral-100 focus:outline-none focus:border-black dark:focus:border-white"
+            />
+          </div>
+
+          {/* Images Toggle */}
+          {note.images && note.images.length > 0 && (
+            <div className="flex items-center justify-between p-2.5 rounded-lg border border-neutral-200 dark:border-neutral-800 bg-neutral-50/50 dark:bg-neutral-900/30">
+              <div>
+                <span className="text-xs font-medium text-neutral-900 dark:text-neutral-100">
+                  Upload Attached Images ({note.images.length})
+                </span>
+                <p className="text-[11px] text-neutral-500">
+                  Push embedded image files to the repo alongside the markdown post.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => handleUpdateConfig({ includeImages: !config.includeImages })}
+                className={`w-9 h-5 flex items-center rounded-full p-0.5 transition-colors ${
+                  config.includeImages ? 'bg-black dark:bg-white' : 'bg-neutral-300 dark:bg-neutral-700'
+                }`}
+              >
+                <div
+                  className={`bg-white dark:bg-black w-4 h-4 rounded-full shadow-md transform transition-transform ${
+                    config.includeImages ? 'translate-x-4' : 'translate-x-0'
+                  }`}
+                />
+              </button>
+            </div>
+          )}
+
+          {/* Action Button */}
+          <button
+            type="button"
+            onClick={handlePublishGitHub}
+            disabled={isPublishing || !config.githubRepo || !config.githubToken}
+            className="w-full py-2.5 px-4 bg-black text-white dark:bg-white dark:text-black font-semibold text-xs rounded-lg hover:opacity-90 transition-opacity flex items-center justify-center gap-2 disabled:opacity-40 shadow-xs"
+          >
+            {isPublishing ? (
+              <>
+                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                <span>Committing & Pushing to GitHub...</span>
+              </>
+            ) : (
+              <>
+                <Upload className="w-3.5 h-3.5" />
+                <span>Publish Post to GitHub</span>
+              </>
+            )}
+          </button>
         </div>
 
         {/* Footer */}
@@ -566,7 +367,7 @@ export const PublishModal: React.FC<PublishModalProps> = ({
                 })}
               </span>
             ) : (
-              <span>Ready to publish</span>
+              <span>Direct GitHub publishing</span>
             )}
           </div>
           <button

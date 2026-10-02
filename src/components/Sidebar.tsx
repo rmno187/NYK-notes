@@ -362,7 +362,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   return (
     <aside
-      className={`w-80 h-full flex flex-col bg-neutral-50 dark:bg-black border-r border-neutral-200 dark:border-neutral-800 shrink-0 select-none transition-colors duration-200 ${className}`}
+      className={`w-80 h-full flex flex-col overflow-hidden bg-neutral-50 dark:bg-black border-r border-neutral-200 dark:border-neutral-800 shrink-0 select-none transition-colors duration-200 ${className}`}
     >
       {/* ==================================================
           TOP BAR

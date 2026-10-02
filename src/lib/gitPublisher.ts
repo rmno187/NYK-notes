@@ -1,17 +1,14 @@
-import { Note, GitPublishConfig, GitPublishMode } from '../types';
+import { Note, GitPublishConfig } from '../types';
 import { serializeNoteToMarkdown } from './markdown';
 import { generateNoteFilename } from './localFileOperations';
 
 const STORAGE_KEY = 'blog_git_publish_config_v1';
 
 export const DEFAULT_GIT_PUBLISH_CONFIG: GitPublishConfig = {
-  mode: 'github',
   githubRepo: '',
   githubBranch: 'main',
   githubFolderPath: 'content/posts',
   githubToken: '',
-  localRepoPath: '',
-  localBranch: 'main',
   commitMessageTemplate: 'Publish: {title}',
   includeImages: true,
 };
@@ -59,7 +56,6 @@ export function stringToBase64(str: string): string {
 
 export interface PublishResult {
   success: boolean;
-  mode: GitPublishMode;
   commitSha?: string;
   commitUrl?: string;
   fileUrl?: string;
@@ -91,7 +87,7 @@ export function getRepoFilePath(note: Note, folderPath: string): { fileName: str
 }
 
 /**
- * 1. Publish directly to GitHub via REST API
+ * Publish directly to GitHub via REST API
  */
 export async function publishToGitHub(
   note: Note,
@@ -103,7 +99,7 @@ export async function publishToGitHub(
   const branch = config.githubBranch?.trim() || 'main';
 
   if (!token) {
-    throw new Error('GitHub Personal Access Token is required. Please add your token in settings.');
+    throw new Error('GitHub Personal Access Token is required. Please enter your token in the setup.');
   }
 
   if (!repoRaw || !repoRaw.includes('/')) {
@@ -232,7 +228,6 @@ export async function publishToGitHub(
 
   return {
     success: true,
-    mode: 'github',
     commitSha,
     commitUrl,
     fileUrl,
@@ -245,70 +240,4 @@ export async function publishToGitHub(
       `Commit URL: ${commitUrl}`,
     ].filter(Boolean),
   };
-}
-
-/**
- * 2. Publish via Local Server Git Runner
- */
-export async function publishViaLocalServer(
-  note: Note,
-  config: GitPublishConfig,
-  customCommitMessage?: string
-): Promise<PublishResult> {
-  const commitMessage =
-    customCommitMessage?.trim() || formatCommitMessage(config.commitMessageTemplate, note);
-  const branch = config.localBranch?.trim() || 'main';
-  const repoPath = config.localRepoPath?.trim();
-
-  const response = await fetch('/api/git/publish', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      repoPath,
-      commitMessage,
-      branch,
-    }),
-  });
-
-  const data = await response.json().catch(() => ({}));
-
-  if (!response.ok) {
-    throw new Error(data.error || `Local Git server error (${response.status})`);
-  }
-
-  // Save last published
-  saveStoredGitPublishConfig({
-    lastPublishedAt: Date.now(),
-    lastCommitSha: data.commitSha,
-    lastPublishedFileName: note.fileName,
-  });
-
-  return {
-    success: true,
-    mode: 'local',
-    commitSha: data.commitSha,
-    logs: data.logs || ['Git commands executed successfully on local machine.'],
-  };
-}
-
-/**
- * 3. Generate terminal commands ready to copy-paste
- */
-export function generateTerminalCommands(note: Note, config: GitPublishConfig): {
-  commandString: string;
-  steps: string[];
-} {
-  const commitMessage = formatCommitMessage(config.commitMessageTemplate, note).replace(/"/g, '\\"');
-  const branch = config.localBranch || 'main';
-
-  const steps = [
-    'git add .',
-    'git status',
-    `git commit -m "${commitMessage}"`,
-    `git push origin ${branch}`,
-  ];
-
-  const commandString = `git add . && git status && git commit -m "${commitMessage}" && git push origin ${branch}`;
-
-  return { commandString, steps };
 }

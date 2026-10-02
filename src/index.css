@@ -7,7 +7,9 @@ html, body, #root {
   width: 100%;
   margin: 0;
   padding: 0;
-  overscroll-behavior-y: auto;
+  overflow: hidden;
+  overscroll-behavior: none;
+  -webkit-text-size-adjust: 100%;
 }
 
 /* Minimalist desktop scrollbars across all browsers */
