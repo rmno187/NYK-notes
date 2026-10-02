@@ -42,6 +42,7 @@ interface OptionsSlideoutProps {
   onOpenBackupModal?: () => void;
   onOpenImportModal?: () => void;
   onOpenShortcutsModal?: () => void;
+  onOpenPublishModal?: () => void;
 }
 
 const PROJECT_STATUSES = ['Active', 'Development', 'Ended'];
@@ -85,6 +86,7 @@ export const OptionsSlideout: React.FC<OptionsSlideoutProps> = ({
   onOpenBackupModal,
   onOpenImportModal,
   onOpenShortcutsModal,
+  onOpenPublishModal,
 }) => {
   // Filename State
   const [isEditingFileName, setIsEditingFileName] = useState(false);
@@ -1602,6 +1604,28 @@ export const OptionsSlideout: React.FC<OptionsSlideoutProps> = ({
                       : storageMode === 'filesystem' && directoryName
                       ? directoryName
                       : 'Browser'}
+                  </span>
+                </button>
+              )}
+
+              {/* Publish to Blog via Git */}
+              {onOpenPublishModal && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    onOpenPublishModal();
+                    onClose();
+                  }}
+                  className="group flex items-center justify-between py-2.5 text-left border-b border-neutral-100 dark:border-neutral-900"
+                >
+                  <span className="text-sm font-semibold text-black dark:text-white group-hover:underline underline-offset-4 flex items-center gap-1.5">
+                    Publish to Blog
+                    <span className="text-[10px] font-mono px-1 py-0.2 rounded bg-black text-white dark:bg-white dark:text-black">
+                      Git
+                    </span>
+                  </span>
+                  <span className="text-xs text-neutral-400 dark:text-neutral-600">
+                    GitHub / Local
                   </span>
                 </button>
               )}

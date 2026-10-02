@@ -2,8 +2,12 @@ import express from 'express';
 import path from 'path';
 import fs from 'fs';
 import crypto from 'node:crypto';
+import { exec } from 'node:child_process';
+import { promisify } from 'node:util';
 import { createServer as createViteServer } from 'vite';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
+
+const execAsync = promisify(exec);
 
 // Supabase & Zero-Knowledge E2EE Server Layer
 // The backend & Supabase database NEVER receive plaintext note content or master encryption keys.
@@ -483,6 +487,134 @@ async function startServer() {
       responderPublicKey: session.responderPublicKey,
       encryptedCredentials: session.encryptedCredentials,
     });
+  });
+
+  // 6. Local Git Status check
+  app.post('/api/git/status', async (req, res) => {
+    try {
+      const { repoPath } = req.body;
+      const targetDir = repoPath ? path.resolve(repoPath) : process.cwd();
+      if (!fs.existsSync(targetDir)) {
+        return res.status(404).json({ error: `Directory not found: ${targetDir}` });
+      }
+      if (!fs.existsSync(path.join(targetDir, '.git'))) {
+        return res.status(400).json({ error: `Not a git repository: ${targetDir}` });
+      }
+
+      const { stdout: branchOut } = await execAsync('git rev-parse --abbrev-ref HEAD', { cwd: targetDir });
+      const currentBranch = branchOut.trim() || 'main';
+
+      const { stdout: statusOut } = await execAsync('git status --porcelain', { cwd: targetDir });
+      const changedFiles = statusOut
+        .split('\n')
+        .map((l) => l.trim())
+        .filter(Boolean);
+
+      let remoteUrl = '';
+      try {
+        const { stdout: remoteOut } = await execAsync('git remote get-url origin', { cwd: targetDir });
+        remoteUrl = remoteOut.trim();
+      } catch {
+        // remote may not be configured
+      }
+
+      res.json({
+        available: true,
+        repoPath: targetDir,
+        branch: currentBranch,
+        changedFiles,
+        hasChanges: changedFiles.length > 0,
+        remoteUrl,
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || 'Failed to inspect git repo' });
+    }
+  });
+
+  // 7. Local Git Publish (git add, git status, git commit, git push)
+  app.post('/api/git/publish', async (req, res) => {
+    try {
+      const { repoPath, commitMessage, branch = 'main', files = '.' } = req.body;
+      const targetDir = repoPath ? path.resolve(repoPath) : process.cwd();
+
+      if (!fs.existsSync(targetDir)) {
+        return res.status(404).json({ error: `Directory not found: ${targetDir}` });
+      }
+      if (!fs.existsSync(path.join(targetDir, '.git'))) {
+        return res.status(400).json({
+          error: `Target path is not a git repository: ${targetDir}. Please specify your blog repo path.`,
+        });
+      }
+
+      const message = (commitMessage || 'Publish blog post').replace(/"/g, '\\"');
+      const logs: string[] = [];
+
+      // 1. git add
+      logs.push(`$ git add ${files}`);
+      const addRes = await execAsync(`git add ${files}`, { cwd: targetDir });
+      if (addRes.stdout) logs.push(addRes.stdout.trim());
+      if (addRes.stderr) logs.push(addRes.stderr.trim());
+
+      // 2. git status
+      logs.push(`$ git status --porcelain`);
+      const statusRes = await execAsync('git status --porcelain', { cwd: targetDir });
+      const stagedSummary = statusRes.stdout.trim();
+      if (stagedSummary) {
+        logs.push(stagedSummary);
+      }
+
+      // Check if anything to commit
+      let committed = false;
+      try {
+        logs.push(`$ git commit -m "${message}"`);
+        const commitRes = await execAsync(`git commit -m "${message}"`, { cwd: targetDir });
+        if (commitRes.stdout) logs.push(commitRes.stdout.trim());
+        if (commitRes.stderr) logs.push(commitRes.stderr.trim());
+        committed = true;
+      } catch (commitErr: any) {
+        if (commitErr.stdout && commitErr.stdout.includes('nothing to commit')) {
+          logs.push('Nothing to commit (working tree clean).');
+        } else {
+          logs.push(`Commit info: ${commitErr.message}`);
+        }
+      }
+
+      // 3. git push
+      logs.push(`$ git push origin ${branch}`);
+      let pushed = false;
+      try {
+        const pushRes = await execAsync(`git push origin ${branch}`, { cwd: targetDir });
+        if (pushRes.stdout) logs.push(pushRes.stdout.trim());
+        if (pushRes.stderr) logs.push(pushRes.stderr.trim());
+        pushed = true;
+      } catch (pushErr: any) {
+        logs.push(`Push failed: ${pushErr.stderr || pushErr.message}`);
+        return res.status(500).json({
+          success: false,
+          logs,
+          error: `git push failed: ${pushErr.stderr || pushErr.message}`,
+        });
+      }
+
+      // 4. rev-parse commit SHA
+      let commitSha = '';
+      try {
+        const { stdout: revOut } = await execAsync('git rev-parse HEAD', { cwd: targetDir });
+        commitSha = revOut.trim();
+      } catch {
+        // ignore
+      }
+
+      res.json({
+        success: true,
+        committed,
+        pushed,
+        commitSha,
+        logs,
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || 'Git publish execution failed' });
+    }
   });
 
   // Vite middleware for development

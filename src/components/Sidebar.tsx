@@ -12,6 +12,7 @@ import {
   RefreshCw,
   FolderOpen,
   HardDrive,
+  GitBranch,
 } from 'lucide-react';
 import { Note, StorageMode, NoteType } from '../types';
 import { NotePreview } from './NotePreview';
@@ -42,6 +43,7 @@ interface SidebarProps {
   onOpenLocalFolderSyncModal?: () => void;
   isLocalFolderConfigured?: boolean;
   onOpenLocalFile?: () => void;
+  onOpenPublishModal?: () => void;
   className?: string;
 }
 
@@ -61,6 +63,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onOpenLocalFolderSyncModal,
   isLocalFolderConfigured,
   onOpenLocalFile,
+  onOpenPublishModal,
   className = '',
 }) => {
   const [activeTab, setActiveTab] = useState<'notes' | 'blog' | 'projects' | 'trash'>('notes');
@@ -621,7 +624,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </div>
 
             {/* NEW NOTE / POST / PROJECT BUTTON */}
-            <div className="flex items-center">
+            <div className="flex items-center gap-1">
               <button
                 type="button"
                 onClick={() =>

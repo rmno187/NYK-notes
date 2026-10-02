@@ -121,3 +121,24 @@ export interface KeyboardShortcut {
   category: 'General' | 'Navigation' | 'Editing';
   combination: string;
 }
+
+export type GitPublishMode = 'github' | 'local' | 'copy';
+
+export interface GitPublishConfig {
+  mode: GitPublishMode;
+  // GitHub REST API
+  githubRepo: string; // e.g. "username/blog"
+  githubBranch: string; // e.g. "main"
+  githubFolderPath: string; // e.g. "content/posts" or "posts"
+  githubToken: string; // Personal access token (fine-grained or classic with contents:write)
+  // Local Git Execution
+  localRepoPath: string; // path to local git repo on machine
+  localBranch: string;
+  // Commit settings
+  commitMessageTemplate: string; // e.g. "Publish: {title}"
+  includeImages: boolean;
+  lastPublishedAt?: number;
+  lastCommitSha?: string;
+  lastCommitUrl?: string;
+  lastPublishedFileName?: string;
+}

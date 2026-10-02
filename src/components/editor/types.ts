@@ -94,4 +94,5 @@ export interface EditorPaneProps {
   onOpenBackupModal?: () => void;
   onOpenImportModal?: () => void;
   onOpenShortcutsModal?: () => void;
+  onOpenPublishModal?: () => void;
 }

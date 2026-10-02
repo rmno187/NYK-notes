@@ -1,5 +1,5 @@
 import React, { useRef, useState, useEffect, useCallback } from 'react';
-import { MoreVertical, ArrowLeft, Check, Image as ImageIcon, Sparkles } from 'lucide-react';
+import { MoreVertical, ArrowLeft, Check, Image as ImageIcon, Sparkles, GitBranch } from 'lucide-react';
 import { EditorMode, NoteImage, ImageFolderStrategy } from '../types';
 import { renderMarkdownToHtml } from '../lib/markdown';
 import { cleanImageFilename, computeRelativeImagePath, readFileAsDataUrl } from '../lib/imageUtils';
@@ -58,6 +58,7 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
   onOpenBackupModal,
   onOpenImportModal,
   onOpenShortcutsModal,
+  onOpenPublishModal,
 }) => {
   const [internalEditorMode, setInternalEditorMode] = useState<EditorMode>('wysiwyg');
   const mode = externalEditorMode || internalEditorMode;
@@ -639,6 +640,18 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
           </div>
 
           <div className="flex items-center space-x-1.5 shrink-0">
+            {note.type === 'post' && onOpenPublishModal && (
+              <button
+                type="button"
+                onClick={onOpenPublishModal}
+                className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-black text-white dark:bg-white dark:text-black hover:opacity-90 transition-opacity text-xs font-semibold tracking-wide shadow-xs"
+                title="Publish post to blog (Git / GitHub)"
+              >
+                <GitBranch className="w-3.5 h-3.5" />
+                <span>Publish</span>
+              </button>
+            )}
+
             <button
               type="button"
               onClick={() => setIsSlideoutOpen(true)}
@@ -823,6 +836,7 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
         onOpenBackupModal={onOpenBackupModal}
         onOpenImportModal={onOpenImportModal}
         onOpenShortcutsModal={onOpenShortcutsModal}
+        onOpenPublishModal={onOpenPublishModal}
       />
     </div>
   );

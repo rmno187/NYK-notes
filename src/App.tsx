@@ -24,6 +24,7 @@ import { BackupModal } from './components/BackupModal';
 import { ImportModal } from './components/ImportModal';
 import { ShortcutsModal } from './components/ShortcutsModal';
 import { LocalFolderSyncModal } from './components/LocalFolderSyncModal';
+import { PublishModal } from './components/PublishModal';
 import { localFolderManager } from './lib/localFolderManager';
 
 const DEFAULT_WELCOME_NOTES: Note[] = [
@@ -156,6 +157,7 @@ export default function App() {
   const [isBackupModalOpen, setIsBackupModalOpen] = useState(false);
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [isShortcutsModalOpen, setIsShortcutsModalOpen] = useState(false);
+  const [isPublishModalOpen, setIsPublishModalOpen] = useState(false);
 
   // Initialize and subscribe to Local Folder Sync configuration
   useEffect(() => {
@@ -1634,6 +1636,7 @@ export default function App() {
       setIsBackupModalOpen(false);
       setIsImportModalOpen(false);
       setIsShortcutsModalOpen(false);
+      setIsPublishModalOpen(false);
     },
   });
 
@@ -1666,6 +1669,7 @@ export default function App() {
           onOpenLocalFolderSyncModal={() => setIsLocalFolderSyncModalOpen(true)}
           isLocalFolderConfigured={isLocalFolderConfigured}
           onOpenLocalFile={handleOpenLocalMarkdownFile}
+          onOpenPublishModal={() => setIsPublishModalOpen(true)}
           className={mobileView === 'editor' ? 'hidden md:flex w-full md:w-80' : 'flex w-full md:w-80'}
         />
 
@@ -1719,6 +1723,7 @@ export default function App() {
               onOpenBackupModal={() => setIsBackupModalOpen(true)}
               onOpenImportModal={() => setIsImportModalOpen(true)}
               onOpenShortcutsModal={() => setIsShortcutsModalOpen(true)}
+              onOpenPublishModal={() => setIsPublishModalOpen(true)}
             />
           ) : (
             <div className="flex-1 flex flex-col items-center justify-center p-8 text-center bg-white dark:bg-black">
@@ -1803,6 +1808,18 @@ export default function App() {
       />
 
       <ShortcutsModal isOpen={isShortcutsModalOpen} onClose={() => setIsShortcutsModalOpen(false)} />
+
+      {activeNote && (
+        <PublishModal
+          isOpen={isPublishModalOpen}
+          onClose={() => setIsPublishModalOpen(false)}
+          note={activeNote}
+          onPublishSuccess={() => {
+            setToastMessage('Post published successfully!');
+            setTimeout(() => setToastMessage(null), 3000);
+          }}
+        />
+      )}
     </div>
   );
 }
