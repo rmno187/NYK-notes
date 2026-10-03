@@ -17,7 +17,7 @@ import {
 import { Note, StorageMode, NoteType } from '../types';
 import { NotePreview } from './NotePreview';
 import { modKey } from '../lib/platform';
-import { isNoteEmpty, normalizeTags } from '../lib/noteUtils';
+import { isNoteEmpty, normalizeTags, deduplicateNotes, getBlogCreatedTime } from '../lib/noteUtils';
 import { SyncStatusIndicator } from './SyncStatusIndicator';
 
 interface SidebarProps {
@@ -137,21 +137,23 @@ export const Sidebar: React.FC<SidebarProps> = ({
     };
   }, []);
 
+  const deduplicatedNotes = useMemo(() => deduplicateNotes(notes), [notes]);
+
   const activeNotes = useMemo(
-    () => notes.filter((n) => !n.deletedAt && (!n.type || n.type === 'note') && !isNoteEmpty(n)),
-    [notes]
+    () => deduplicatedNotes.filter((n) => !n.deletedAt && (!n.type || n.type === 'note') && !isNoteEmpty(n)),
+    [deduplicatedNotes]
   );
   const blogNotes = useMemo(
-    () => notes.filter((n) => !n.deletedAt && n.type === 'post' && !isNoteEmpty(n)),
-    [notes]
+    () => deduplicatedNotes.filter((n) => !n.deletedAt && n.type === 'post' && !isNoteEmpty(n)),
+    [deduplicatedNotes]
   );
   const projectNotes = useMemo(
-    () => notes.filter((n) => !n.deletedAt && n.type === 'project' && !isNoteEmpty(n)),
-    [notes]
+    () => deduplicatedNotes.filter((n) => !n.deletedAt && n.type === 'project' && !isNoteEmpty(n)),
+    [deduplicatedNotes]
   );
   const trashedNotes = useMemo(
-    () => notes.filter((n) => Boolean(n.deletedAt)),
-    [notes]
+    () => deduplicatedNotes.filter((n) => Boolean(n.deletedAt)),
+    [deduplicatedNotes]
   );
 
   const currentNotesList = useMemo(() => {
@@ -231,10 +233,19 @@ export const Sidebar: React.FC<SidebarProps> = ({
         if (a.pinned && !b.pinned) return -1;
         if (!a.pinned && b.pinned) return 1;
 
-        // 2. Publication date / most recent timestamp on top
-        const timeA = getTimestamp(a);
-        const timeB = getTimestamp(b);
-        return timeB - timeA;
+        // 2. Sort by creation date descending (most recent on top)
+        const timeA = getBlogCreatedTime(a);
+        const timeB = getBlogCreatedTime(b);
+        if (timeA !== timeB) {
+          return timeB - timeA;
+        }
+
+        // 3. Fallback tiebreakers for exact same created timestamp
+        const createdDiff = (b.createdAt || 0) - (a.createdAt || 0);
+        if (createdDiff !== 0) return createdDiff;
+        const updatedDiff = (b.updatedAt || 0) - (a.updatedAt || 0);
+        if (updatedDiff !== 0) return updatedDiff;
+        return (b.id || '').localeCompare(a.id || '');
       }
 
       if (activeTab === 'notes') {
@@ -243,7 +254,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
         const timeA = a.updatedAt || a.createdAt || 0;
         const timeB = b.updatedAt || b.createdAt || 0;
-        return timeB - timeA;
+        if (timeA !== timeB) return timeB - timeA;
+        return (b.createdAt || 0) - (a.createdAt || 0);
       }
 
       return (b.deletedAt || 0) - (a.deletedAt || 0);
@@ -668,6 +680,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     (e.target as HTMLInputElement).blur();
                   }
                 }}
+                onFocus={() => window.scrollTo(0, 0)}
                 className="
                   w-full
                   pl-5 pr-5 py-1
@@ -675,7 +688,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   border-0
                   border-b border-neutral-300 dark:border-neutral-700
                   rounded-none
-                  text-xs
+                  text-base sm:text-xs
                   text-neutral-900 dark:text-neutral-100
                   placeholder-neutral-400
                   font-mono
@@ -809,7 +822,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               : '';
 
             const formattedDate = note.date || new Date(
-              note.updatedAt || note.createdAt
+              note.createdAt || note.updatedAt
             ).toLocaleDateString(undefined, {
               month: 'short',
               day: 'numeric',

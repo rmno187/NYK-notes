@@ -319,8 +319,8 @@ export async function openLocalMarkdownFile(): Promise<{ note: Note; fileName: s
         author: parsed.author,
         project: parsed.project,
         featured: parsed.featured,
-        createdAt: file.lastModified || Date.now(),
-        updatedAt: file.lastModified || Date.now(),
+        createdAt: parsed.createdAt || (parsed.date && !isNaN(Date.parse(parsed.date)) ? Date.parse(parsed.date) : file.lastModified || Date.now()),
+        updatedAt: parsed.updatedAt || file.lastModified || Date.now(),
         fileName: file.name,
       };
 
@@ -362,8 +362,8 @@ export async function openLocalMarkdownFile(): Promise<{ note: Note; fileName: s
           author: parsed.author,
           project: parsed.project,
           featured: parsed.featured,
-          createdAt: file.lastModified || Date.now(),
-          updatedAt: file.lastModified || Date.now(),
+          createdAt: parsed.createdAt || (parsed.date && !isNaN(Date.parse(parsed.date)) ? Date.parse(parsed.date) : file.lastModified || Date.now()),
+          updatedAt: parsed.updatedAt || file.lastModified || Date.now(),
           fileName: file.name,
         };
 

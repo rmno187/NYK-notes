@@ -2,7 +2,7 @@ import JSZip from 'jszip';
 import { Note, NoteImage } from '../types';
 import { parseMarkdownNote } from './markdown';
 import { readFileAsDataUrl } from './imageUtils';
-import { getNoteBaseName, normalizeTags } from './noteUtils';
+import { getNoteBaseName, normalizeTags, deduplicateNotes } from './noteUtils';
 
 const IMAGE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'avif', 'bmp']);
 
@@ -224,12 +224,12 @@ export async function importNotesFromFiles(files: FileList | File[]): Promise<No
       author: parsed.author,
       project: parsed.project,
       featured: parsed.featured,
-      createdAt: mdFile.lastModified || Date.now(),
-      updatedAt: mdFile.lastModified || Date.now(),
+      createdAt: parsed.createdAt || (parsed.date && !isNaN(Date.parse(parsed.date)) ? Date.parse(parsed.date) : mdFile.lastModified || Date.now()),
+      updatedAt: parsed.updatedAt || mdFile.lastModified || Date.now(),
       fileName: fileName,
       images: attachedImages.length > 0 ? attachedImages : undefined,
     });
   }
 
-  return notes;
+  return deduplicateNotes(notes);
 }

@@ -1,6 +1,6 @@
 import { Note, NoteType, LocalFolderConfig } from '../types';
 import { serializeNoteToMarkdown, parseMarkdownNote } from './markdown';
-import { getNoteBaseName, slugify, normalizeTags } from './noteUtils';
+import { getNoteBaseName, slugify, normalizeTags, deduplicateNotes } from './noteUtils';
 import { readFileAsDataUrl } from './imageUtils';
 import { saveImagesToDirectoryHandle } from './localFileOperations';
 
@@ -578,6 +578,15 @@ class LocalFolderManager {
             }
           }
 
+          const frontmatterDateTs = parsed.date ? Date.parse(parsed.date) : NaN;
+          const effectiveCreatedAt =
+            parsed.createdAt ||
+            (!isNaN(frontmatterDateTs) && frontmatterDateTs > 0 ? frontmatterDateTs : file.lastModified || Date.now());
+          const effectiveUpdatedAt =
+            parsed.updatedAt ||
+            file.lastModified ||
+            effectiveCreatedAt;
+
           loadedNotes.push({
             id: parsed.id || `local-${fileName.replace(/\.md$/, '')}`,
             title: parsed.title,
@@ -590,14 +599,14 @@ class LocalFolderManager {
             author: parsed.author,
             project: parsed.project,
             featured: parsed.featured,
-            slug: parsed.slug || (inferredType === 'project' ? (parsed.title ? slugify(parsed.title) : '') : undefined),
+            slug: parsed.slug || ((inferredType === 'project' || inferredType === 'post') ? (parsed.title ? slugify(parsed.title) : '') : undefined),
             status: parsed.status,
             year: parsed.year,
             url: parsed.url,
             github: parsed.github,
             order: parsed.order,
-            createdAt: file.lastModified || Date.now(),
-            updatedAt: file.lastModified || Date.now(),
+            createdAt: effectiveCreatedAt,
+            updatedAt: effectiveUpdatedAt,
             fileName,
             localBackedUp: true,
             images: images.length > 0 ? images : undefined,
@@ -648,7 +657,7 @@ class LocalFolderManager {
       }
     }
 
-    return loadedNotes;
+    return deduplicateNotes(loadedNotes);
   }
 }
 

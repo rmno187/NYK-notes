@@ -248,6 +248,8 @@ export function parseMarkdownNote(rawContent: string, defaultFileName?: string) 
   let pinned = false;
   let type: NoteType | undefined = undefined;
   let date: string | undefined = undefined;
+  let createdAt: number | undefined = undefined;
+  let updatedAt: number | undefined = undefined;
   let description: string | undefined = undefined;
   let author: string | undefined = undefined;
   let project: string | undefined = undefined;
@@ -259,6 +261,22 @@ export function parseMarkdownNote(rawContent: string, defaultFileName?: string) 
   let github: string | undefined = undefined;
   let order: number | undefined = undefined;
   let content = (rawContent || '').replace(/^\uFEFF/, ''); // Strip UTF-8 BOM if present
+
+  // Helper to handle date parsing
+  const processDateKey = (val: string) => {
+    const cleanVal = val.replace(/^['"]|['"]$/g, '').trim();
+    if (!cleanVal) return;
+    if (!date) date = cleanVal;
+    const num = Number(cleanVal);
+    if (!isNaN(num) && num > 100000000) {
+      if (!createdAt) createdAt = num;
+    } else {
+      const parsed = Date.parse(cleanVal);
+      if (!isNaN(parsed) && parsed > 0 && !createdAt) {
+        createdAt = parsed;
+      }
+    }
+  };
 
   // 1. Check for YAML Frontmatter delimited by --- or +++
   const frontmatterMatch = content.match(/^\s*(?:---|---)\r?\n([\s\S]*?)\r?\n(?:---|---)[ \t]*\r?\n?([\s\S]*)$/);
@@ -283,8 +301,12 @@ export function parseMarkdownNote(rawContent: string, defaultFileName?: string) 
           pinned = value.toLowerCase() === 'true';
         } else if (key === 'tags') {
           tags = parseTagsValue(value);
-        } else if (key === 'date') {
-          date = value.replace(/^['"]|['"]$/g, '');
+        } else if (key === 'date' || key === 'created' || key === 'created_at' || key === 'pubdate' || key === 'publishdate' || key === 'published') {
+          processDateKey(value);
+        } else if (key === 'updated' || key === 'updated_at' || key === 'modified') {
+          const cleanVal = value.replace(/^['"]|['"]$/g, '').trim();
+          const parsed = Date.parse(cleanVal);
+          if (!isNaN(parsed) && parsed > 0) updatedAt = parsed;
         } else if (key === 'description' || key === 'subtitle' || key === 'summary') {
           description = value.replace(/^['"]|['"]$/g, '');
         } else if (key === 'author') {
@@ -338,7 +360,8 @@ export function parseMarkdownNote(rawContent: string, defaultFileName?: string) 
       if (colonIdx !== -1) {
         const key = line.slice(0, colonIdx).trim().toLowerCase();
         const value = line.slice(colonIdx + 1).trim();
-        if (['title', 'tags', 'pinned', 'created', 'updated', 'date', 'id', 'description', 'subtitle', 'author', 'project', 'featured', 'slug', 'status', 'year', 'url', 'github', 'order', 'type'].includes(key)) {
+
+        if (['title', 'tags', 'pinned', 'created', 'created_at', 'updated', 'date', 'pubdate', 'publishdate', 'published', 'id', 'description', 'subtitle', 'author', 'project', 'featured', 'slug', 'status', 'year', 'url', 'github', 'order', 'type'].includes(key)) {
           foundHeaders = true;
           headerLineCount = i + 1;
           if (key === 'title') {
@@ -348,8 +371,12 @@ export function parseMarkdownNote(rawContent: string, defaultFileName?: string) 
             pinned = value.toLowerCase() === 'true';
           } else if (key === 'tags') {
             tags = parseTagsValue(value);
-          } else if (key === 'date') {
-            date = value.replace(/^['"]|['"]$/g, '');
+          } else if (key === 'date' || key === 'created' || key === 'created_at' || key === 'pubdate' || key === 'publishdate' || key === 'published') {
+            processDateKey(value);
+          } else if (key === 'updated' || key === 'updated_at' || key === 'modified') {
+            const cleanVal = value.replace(/^['"]|['"]$/g, '').trim();
+            const parsed = Date.parse(cleanVal);
+            if (!isNaN(parsed) && parsed > 0) updatedAt = parsed;
           } else if (key === 'description' || key === 'subtitle' || key === 'summary') {
             description = value.replace(/^['"]|['"]$/g, '');
           } else if (key === 'author') {
@@ -449,6 +476,8 @@ export function parseMarkdownNote(rawContent: string, defaultFileName?: string) 
     url,
     github,
     order,
+    createdAt,
+    updatedAt,
   };
 }
 

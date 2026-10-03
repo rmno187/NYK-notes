@@ -185,6 +185,12 @@ export default function App() {
   // Initial Data Load & Sync Manager init
   useEffect(() => {
     const initApp = async () => {
+      if (typeof window !== 'undefined') {
+        if ('scrollRestoration' in window.history) {
+          window.history.scrollRestoration = 'manual';
+        }
+        window.scrollTo(0, 0);
+      }
       try {
         const savedStorageMode = localStorage.getItem('active_storage_mode') as StorageMode | null;
         const isSyncReady = await syncManager.initialize();
@@ -1438,7 +1444,7 @@ export default function App() {
         await persistNote(note);
       }
 
-      setNotes((prev) => [...importedNotes, ...prev]);
+      setNotes((prev) => mergeNotes(prev, importedNotes));
       setActiveNoteId(importedNotes[0].id);
 
       const totalImages = importedNotes.reduce((acc, n) => acc + (n.images?.length || 0), 0);
@@ -1592,7 +1598,7 @@ export default function App() {
         persistNote(updated);
         showToast(`Opened "${opened.fileName}"`);
       } else {
-        setNotes((prev) => [opened.note, ...prev]);
+        setNotes((prev) => mergeNotes(prev, [opened.note]));
         setActiveNoteId(opened.note.id);
         persistNote(opened.note);
         showToast(`Opened "${opened.fileName}"`);
@@ -1642,7 +1648,7 @@ export default function App() {
   });
 
   return (
-    <div className="flex flex-col h-[100dvh] w-full overflow-hidden bg-white dark:bg-black text-black dark:text-white font-sans antialiased transition-colors duration-200 pt-[env(safe-area-inset-top,0px)] pb-[env(safe-area-inset-bottom,0px)] pl-[env(safe-area-inset-left,0px)] pr-[env(safe-area-inset-right,0px)]">
+    <div className="fixed inset-0 flex flex-col overflow-hidden bg-white dark:bg-black text-black dark:text-white font-sans antialiased transition-colors duration-200 pt-[env(safe-area-inset-top,0px)] pb-[env(safe-area-inset-bottom,0px)] pl-[env(safe-area-inset-left,0px)] pr-[env(safe-area-inset-right,0px)] box-border">
       {/* Main Workspace */}
       <div className="flex-1 flex overflow-hidden relative">
         {/* Sidebar */}
